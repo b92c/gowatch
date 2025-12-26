@@ -18,7 +18,7 @@ GoWatch is a lightweight observability tool tailored for Go developers building 
 To install GoWatch, ensure you have Go 1.25.3 or later installed. Clone the repository and build the project:
 
 ```bash
-git clone https://github.com/b92c/GoWatch.git
-cd GoWatch
+git clone https://github.com/b92c/gowatch.git
+cd gowatch
 make install
 make run

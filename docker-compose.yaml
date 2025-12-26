@@ -2,8 +2,8 @@ version: "3.9"
 
 services:
   obs:
-    image: go-watch:latest
-    container_name: go-watch
+    image: gowatch:latest
+    container_name: gowatch
     build:
       context: ./
       dockerfile: .setup/build/Dockerfile
