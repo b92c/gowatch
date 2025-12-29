@@ -2,7 +2,7 @@ install:
 	make install-dependencies
 	make install-hooks
 install-dependencies:
-	go install github.com/securego/gosec/v2/cmd/gosec@latest \
+	go install github.com/securego/gosec/v2/cmd/gosec@latest
 	go install golang.org/x/tools/go/analysis/passes/fieldalignment/cmd/fieldalignment@latest
 install-hooks:
 	cp .setup/build/config/pre-commit .git/hooks &&\
