@@ -1,6 +1,6 @@
 module github.com/b92c/gowatch
 
-go 1.25.3
+go 1.25
 
 require github.com/moby/moby/client v0.2.1
 
