@@ -1,18 +1,18 @@
 # GoWatch
 
-GoWatch is a lightweight observability tool tailored for Go developers building microservices in Docker stacks, with planned AWS Serverless support. It enables fast, customizable, and extensible monitoring of local services during development, providing real-time insights into performance metrics, logs, distributed tracing, resource consumption, and API status.
+GoWatch is a lightweight, real-time monitoring tool **written in Go** for Docker containers. It provides developers with instant visibility into container resource usage, logs, and system metrics directly in the terminal. Perfect for local development environments, GoWatch works with **any service running in Docker** regardless of the programming language, with planned AWS Serverless support for monitoring CloudWatch, XRay, Lambda, and CloudFormation resources.
 
 ## Features
 
-- **Local Service Monitoring**: Track and visualize metrics for services running locally
-- **Performance Metrics**: Monitor key performance indicators such as response times, throughput, and error rates
-- **Log Aggregation**: Collect and display logs from multiple sources for easier debugging
-- **Distributed Tracing**: Trace requests across microservices to identify bottlenecks and dependencies
-- **Resource Usage Tracking**: Monitor CPU, memory, and other resource consumption
-- **API Status Monitoring**: Check the health and status of APIs in real-time
-- **Docker Integration**: Seamlessly monitor services running in Docker containers
+- **Universal Container Monitoring**: Monitor CPU, memory, and resource usage for **any service in Docker** (Node.js, Python, Java, Go, PHP, etc.)
+- **Real-time Log Aggregation**: Stream and view container logs from all services in one place
+- **Live Resource Tracking**: Track CPU percentage, memory usage, and system metrics with automatic updates
+- **Docker Integration**: Direct Docker daemon integration using the Moby client library
+- **Terminal UI Dashboard**: Beautiful, interactive terminal interface built with tcell and tview
+- **Zero Configuration**: Auto-detects running containers and requires no setup
+- **Development Focused**: Perfect for docker-compose environments and local microservice development
+- **Lightweight**: Minimal resource footprint, built in pure Go
 - **Future AWS Integration**: Planned support for AWS services like CloudWatch, XRay, Lambda, and CloudFormation
-- **Terminal UI**: Interactive dashboard for real-time monitoring and visualization
 
 ## Development Environment
 
@@ -32,9 +32,37 @@ The project includes a complete Docker setup for development:
 # Build the Docker development environment
 make docker-build
 
-# Run the observability tool in Docker
+# Run GoWatch in Docker to monitor your services
 docker compose up
 ```
+
+## User Interface
+
+GoWatch provides a real-time terminal dashboard with three main sections:
+
+**Docker Services Table** - View all running containers with:
+- Container status (Running, Stopped, etc.)
+- Container image information
+- CPU usage percentage
+- Memory consumption (MB)
+- Log line count
+
+**System Resources Panel** - Monitor host system:
+- Total CPU cores
+- Total memory
+- Available free memory
+- Last update timestamp
+
+**Logs Section** - Aggregate logs from all containers:
+- Color-coded output
+- Real-time log streaming
+- Service name identification
+
+### Dashboard Example
+
+![GoWatch Dashboard](.assets/dashboard-example.png)
+
+The interactive dashboard updates every 2 seconds, providing live visibility into your containerized services.
 
 ### Manual Installation
 
@@ -91,12 +119,38 @@ gowatch/
 
 ## Configuration
 
-GoWatch is designed to work out-of-the-box with Docker containers and AWS services. The tool automatically detects:
+GoWatch is designed to work out-of-the-box with Docker environments. The tool automatically:
 
-- Running Docker containers
-- Docker daemon socket for container metrics
-- Future AWS credentials for serverless monitoring
-- Local services and endpoints
+- **Detects all running Docker containers** on the host system
+- **Accesses the Docker daemon socket** for real-time container metrics
+- **Streams logs** from all monitored containers
+- **Calculates resource usage** based on Docker cgroup statistics
+
+No configuration files or environment variables needed - just run `gowatch` and start monitoring!
+
+## Use Cases
+
+GoWatch is ideal for:
+
+- **Local Microservices Development**: Monitor multiple services in docker-compose environments
+- **Performance Debugging**: Quickly identify which containers are consuming excessive CPU or memory
+- **Log Troubleshooting**: Aggregate logs from all services to debug issues across your stack
+- **Development Environment Monitoring**: Keep an eye on resource usage while coding and testing
+- **Container Health Checks**: Ensure all your services are running and healthy
+
+## Supported Technologies
+
+Since GoWatch monitors any Docker container, you can use it with services written in:
+
+- **Go** (Go applications)
+- **Python** (Django, FastAPI, Flask, etc.)
+- **Node.js** (Express, NestJS, etc.)
+- **Java** (Spring Boot, Quarkus, etc.)
+- **PHP** (Laravel, Symfony, etc.)
+- **Ruby** (Rails, Sinatra, etc.)
+- **C#** (.NET, ASP.NET Core)
+- **Rust** (Actix, Rocket, etc.)
+- Any other language/framework running in Docker containers
 
 ## Contributing
 
