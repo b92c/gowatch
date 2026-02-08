@@ -37,7 +37,7 @@ jobs:
         run: make test-command
 
       - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           file: ./coverage.out
           fail_ci_if_error: false
