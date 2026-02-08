@@ -34,45 +34,32 @@ func ParseStats(statsJSON container.StatsResponse) (cpu float64, mem uint64) {
 
 func ParseLogs(rawLogs io.ReadCloser) []string {
 	var logs []string
-	buf := make([]byte, 4096)
+	header := make([]byte, 8)
 
 	for {
-		n, err := rawLogs.Read(buf)
-		if err != nil && err != io.EOF {
-			return []string{"Error reading logs"}
-		}
-		if n == 0 {
+		// Read the 8-byte Docker multiplexed stream header
+		// Format: [stream_type (1 byte)][padding (3 bytes)][size (4 bytes big-endian)]
+		_, err := io.ReadFull(rawLogs, header)
+		if err != nil {
 			break
 		}
 
-		// Handle Docker multiplexed log format
-		// Format: [HEADER][PAYLOAD][HEADER][PAYLOAD]...
-		pos := 0
-		for pos < n {
-			if pos+8 > n {
-				break
-			}
+		// Parse payload size from bytes 4-7 (big-endian uint32)
+		size := int(header[4])<<24 | int(header[5])<<16 | int(header[6])<<8 | int(header[7])
+		if size <= 0 {
+			continue
+		}
 
-			// Header: stream type (1 byte) + size (4 bytes big endian) + padding (3 bytes)
-			_ = buf[pos] // stream type (1=stdout, 2=stderr)
-			// Parse size from next 4 bytes (big endian)
-			size := int(buf[pos+4])<<24 | int(buf[pos+5])<<16 | int(buf[pos+6])<<8 | int(buf[pos+7])
+		// Read the exact payload bytes for this frame
+		payload := make([]byte, size)
+		_, err = io.ReadFull(rawLogs, payload)
+		if err != nil {
+			break
+		}
 
-			pos += 8
-
-			if pos+size > n {
-				break
-			}
-
-			if size > 0 {
-				logLine := string(buf[pos : pos+size])
-				logLine = strings.TrimSpace(logLine)
-				if logLine != "" {
-					logs = append(logs, logLine)
-				}
-			}
-
-			pos += size
+		logLine := strings.TrimSpace(string(payload))
+		if logLine != "" {
+			logs = append(logs, logLine)
 		}
 	}
 

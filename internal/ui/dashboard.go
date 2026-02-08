@@ -168,7 +168,7 @@ func (d *Dashboard) updateLogsView(containers docker.Containers) {
 	d.logsView.Clear()
 	for _, fl := range containers.FlatLogs {
 		color := d.getServiceColor(fl.Service, containers)
-		fmt.Fprintf(d.logsView, "[%s][%s][-] [gray]%s[-]\n", color, fl.Service, fl.Line)
+		fmt.Fprintf(d.logsView, "[yellow]%s[-] [%s]%s[-]\n", fl.Service, color, tview.Escape(fl.Line))
 	}
 
 	if d.firstRender {

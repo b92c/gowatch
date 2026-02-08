@@ -66,7 +66,6 @@ func getContainerLogs(ctx context.Context, apiClient *client.Client, containerID
 		ShowStdout: true,
 		ShowStderr: true,
 		Tail:       "50",
-		Timestamps: true,
 	})
 	if err != nil {
 		return []string{"Error fetching logs"}
