@@ -88,26 +88,26 @@ func getHostInfo() HostInfo {
 
 type Containers struct {
 	C        []Container
-	Host     HostInfo
 	Logs     []ContainerLog
 	FlatLogs []FormattedLog
+	Host     HostInfo
 }
 
 type Container struct {
-	ID         string
-	Image      string
+	Service    string
+	SOVersion  string
 	Status     string
 	State      string
 	Command    string
 	DependsOn  string
-	Service    string
-	SOVersion  string
 	WorkingDir string
+	ID         string
+	Image      string
 	ConfigFile string
-	CreatedAt  int64
-	CPUPercent float64
-	MemUsage   uint64
 	Log        []string
+	MemUsage   uint64
+	CPUPercent float64
+	CreatedAt  int64
 }
 
 func WatchContainers(ctx context.Context, apiClient *client.Client) (Containers, error) {

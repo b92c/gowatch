@@ -64,9 +64,45 @@ GoWatch provides a real-time terminal dashboard with three main sections:
 
 The interactive dashboard updates every 2 seconds, providing live visibility into your containerized services.
 
+## Installation
+
+### Quick Install (Recommended)
+
+Install GoWatch with a single command — no Go or Git required:
+
+**Linux / macOS:**
+
+```bash
+curl -sSL https://raw.githubusercontent.com/b92c/gowatch/main/.installer/install.sh | bash
+```
+
+**Install a specific version:**
+
+```bash
+curl -sSL https://raw.githubusercontent.com/b92c/gowatch/main/.installer/install.sh | bash -s -- v1.0.0
+```
+
+**Custom install directory:**
+
+```bash
+GOWATCH_INSTALL_DIR=$HOME/.local/bin curl -sSL https://raw.githubusercontent.com/b92c/gowatch/main/.installer/install.sh | bash
+```
+
+**Windows (Git Bash / MSYS2):**
+
+```bash
+curl -sSL https://raw.githubusercontent.com/b92c/gowatch/main/.installer/install.sh | bash
+```
+
+### Uninstall
+
+```bash
+curl -sSL https://raw.githubusercontent.com/b92c/gowatch/main/.installer/uninstall.sh | bash
+```
+
 ### Manual Installation
 
-To install GoWatch locally, ensure you have Go 1.25.3 or later installed:
+To install GoWatch from source, ensure you have Go 1.25 or later installed:
 
 ```bash
 git clone https://github.com/b92c/gowatch.git
