@@ -1,0 +1,135 @@
+{
+  "version": "1.0.0",
+  "generated": "2026-03-22T00:00:00.000Z",
+  "stack": {
+    "primaryLanguage": "go",
+    "languages": ["go"],
+    "frameworks": ["tview", "tcell"],
+    "buildTools": ["make"],
+    "testFrameworks": ["testing"],
+    "packageManager": "go modules",
+    "isMonorepo": false,
+    "hasDocker": true,
+    "hasCI": true
+  },
+  "structure": {
+    "totalFiles": 13,
+    "topDirectories": [
+      {
+        "name": "cmd/gowatch",
+        "description": "Application entry point",
+        "fileCount": 1,
+        "files": ["main.go"]
+      },
+      {
+        "name": "internal/docker",
+        "description": "Docker daemon interaction and container monitoring",
+        "fileCount": 2,
+        "files": ["collector.go", "parser.go"]
+      },
+      {
+        "name": "internal/ui",
+        "description": "Terminal UI dashboard using tcell/tview",
+        "fileCount": 2,
+        "files": ["dashboard.go", "components.go"]
+      },
+      {
+        "name": "internal/config",
+        "description": "Configuration management",
+        "fileCount": 1,
+        "files": ["config.go"]
+      },
+      {
+        "name": "internal/trace",
+        "description": "Distributed tracing functionality (planned)",
+        "fileCount": 2,
+        "files": ["correlator.go", "exporter.go"]
+      },
+      {
+        "name": "internal/aws",
+        "description": "AWS integrations (planned)",
+        "fileCount": 4,
+        "files": ["cloudwatch.go", "xray.go", "lambda.go", "cloudformation.go"]
+      },
+      {
+        "name": "pkg/metrics",
+        "description": "Public metrics types",
+        "fileCount": 1,
+        "files": ["types.go"]
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Docker Collector",
+      "path": "internal/docker/collector.go",
+      "description": "Watches Docker containers, collects stats and logs via Moby client",
+      "exports": ["WatchContainers", "Containers", "Container", "ContainerStats", "ContainerLog", "HostInfo", "FormattedLog"],
+      "dependencies": ["github.com/moby/moby/client", "github.com/moby/moby/api/types/container"]
+    },
+    {
+      "name": "Docker Parser",
+      "path": "internal/docker/parser.go",
+      "description": "Parses Docker stats and multiplexed log streams",
+      "exports": ["ParseStats", "ParseLogs"],
+      "dependencies": ["github.com/moby/moby/api/types/container"]
+    },
+    {
+      "name": "Dashboard",
+      "path": "internal/ui/dashboard.go",
+      "description": "Interactive terminal dashboard with services table, resources panel, and logs view",
+      "exports": ["Dashboard", "NewDashboard"],
+      "dependencies": ["github.com/rivo/tview", "github.com/gdamore/tcell/v2", "internal/docker"]
+    },
+    {
+      "name": "Main",
+      "path": "cmd/gowatch/main.go",
+      "description": "Application entry point - creates Docker client and runs dashboard",
+      "exports": [],
+      "dependencies": ["internal/docker", "internal/ui", "github.com/moby/moby/client"]
+    }
+  ],
+  "dependencies": {
+    "direct": {
+      "github.com/gdamore/tcell/v2": "v2.13.6",
+      "github.com/moby/moby/api": "v1.52.0",
+      "github.com/moby/moby/client": "v0.2.1",
+      "github.com/rivo/tview": "v0.42.0"
+    },
+    "indirect": {
+      "go.opentelemetry.io/otel": "v1.35.0",
+      "go.opentelemetry.io/otel/trace": "v1.35.0",
+      "golang.org/x/sys": "v0.38.0",
+      "golang.org/x/term": "v0.37.0"
+    }
+  },
+  "entryPoints": [
+    {
+      "name": "gowatch",
+      "path": "cmd/gowatch/main.go",
+      "description": "Main CLI entry point"
+    }
+  ],
+  "dataFlow": [
+    {
+      "step": 1,
+      "description": "main.go creates Docker client via client.New(client.FromEnv)"
+    },
+    {
+      "step": 2,
+      "description": "Goroutine ticker (2s interval) calls docker.WatchContainers()"
+    },
+    {
+      "step": 3,
+      "description": "Collector lists containers, fetches stats and logs for each"
+    },
+    {
+      "step": 4,
+      "description": "Parsed data sent to Dashboard.Update()"
+    },
+    {
+      "step": 5,
+      "description": "Dashboard renders services table, resources panel, and logs"
+    }
+  ]
+}
