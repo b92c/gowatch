@@ -22,7 +22,7 @@ This directory contains ready-to-customize playbooks for AI agents collaborating
 4. Run `make test` and `make go-sec` before completing.
 
 ## Tech Stack Reference
-- **Language**: Go 1.25+
+- **Language**: Go 1.26+
 - **Docker Client**: Moby (`github.com/moby/moby`)
 - **Terminal UI**: tview + tcell
 - **Build**: makefile

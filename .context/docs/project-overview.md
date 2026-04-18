@@ -43,7 +43,7 @@ gowatch/
 
 ## Tech Stack
 
-- **Language**: Go 1.25+
+- **Language**: Go 1.26+
 - **Docker Client**: Moby (`github.com/moby/moby`) - direct Docker daemon API via Unix socket
 - **Terminal UI**: tcell v2 (low-level) + tview (high-level widgets)
 - **Observability**: OpenTelemetry (tracing infrastructure, planned)

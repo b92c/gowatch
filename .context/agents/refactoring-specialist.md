@@ -19,7 +19,7 @@ This agent specializes in refactoring Go code for GoWatch, a real-time Docker co
 
 GoWatch monitors Docker containers via the Moby client and displays metrics in a terminal dashboard. Refactoring should focus on Go idioms, interface design, memory efficiency, and clean architecture.
 
-**Tech Stack**: Go 1.25+, Moby Docker client, tview/tcell terminal UI
+**Tech Stack**: Go 1.26+, Moby Docker client, tview/tcell terminal UI
 
 ## Codebase Structure
 

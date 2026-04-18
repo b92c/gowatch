@@ -102,7 +102,7 @@ curl -sSL https://raw.githubusercontent.com/b92c/gowatch/main/.installer/uninsta
 
 ### Manual Installation
 
-To install GoWatch from source, ensure you have Go 1.25 or later installed:
+To install GoWatch from source, ensure you have Go 1.26 or later installed:
 
 ```bash
 git clone https://github.com/b92c/gowatch.git

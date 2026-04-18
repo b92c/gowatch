@@ -19,7 +19,7 @@ This agent specializes in writing Go tests for GoWatch, a real-time Docker conta
 
 GoWatch monitors Docker containers via the Moby client and displays metrics in a terminal dashboard. Tests should cover Docker integration logic, parsing functions, and UI data transformations.
 
-**Tech Stack**: Go 1.25+, testing package, race detection
+**Tech Stack**: Go 1.26+, testing package, race detection
 
 ## Codebase Structure
 

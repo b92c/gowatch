@@ -19,7 +19,7 @@ This agent specializes in debugging and fixing bugs in GoWatch, a real-time Dock
 
 GoWatch monitors Docker containers via the Moby client and displays metrics in a terminal dashboard using tview/tcell.
 
-**Tech Stack**: Go 1.25+, Moby Docker client, tview/tcell terminal UI
+**Tech Stack**: Go 1.26+, Moby Docker client, tview/tcell terminal UI
 
 ## Codebase Structure
 

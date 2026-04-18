@@ -1,6 +1,6 @@
 module github.com/b92c/gowatch
 
-go 1.25
+go 1.26
 
 require (
 	github.com/gdamore/tcell/v2 v2.13.6

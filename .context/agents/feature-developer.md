@@ -19,7 +19,7 @@ This agent specializes in implementing new features for GoWatch, a real-time Doc
 
 GoWatch monitors Docker containers and displays real-time metrics (CPU, memory, logs) in a terminal dashboard using tcell/tview.
 
-**Tech Stack**: Go 1.25+, Moby Docker client, tview/tcell terminal UI
+**Tech Stack**: Go 1.26+, Moby Docker client, tview/tcell terminal UI
 
 ## Codebase Structure
 

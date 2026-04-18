@@ -19,7 +19,7 @@ This agent specializes in performance optimization for GoWatch, a real-time Dock
 
 GoWatch monitors Docker containers via the Moby client and displays metrics in a terminal dashboard. Performance is critical as the tool polls containers every 2 seconds and renders a live UI.
 
-**Tech Stack**: Go 1.25+, Moby Docker client, tview/tcell terminal UI
+**Tech Stack**: Go 1.26+, Moby Docker client, tview/tcell terminal UI
 
 ## Codebase Structure
 

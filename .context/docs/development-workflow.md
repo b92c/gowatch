@@ -12,7 +12,7 @@ scaffoldVersion: "2.0.0"
 
 ## Prerequisites
 
-- Go 1.25+ installed
+- Go 1.26+ installed
 - Docker and Docker Compose
 - Access to Docker daemon socket (`/var/run/docker.sock`)
 

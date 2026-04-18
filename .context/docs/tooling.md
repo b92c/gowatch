@@ -12,7 +12,7 @@ scaffoldVersion: "2.0.0"
 
 ## Required Tools
 
-- **Go 1.25+** - Primary language
+- **Go 1.26+** - Primary language
 - **Docker** - Container runtime for testing and development
 - **Docker Compose** - Multi-container orchestration
 - **make** - Build automation

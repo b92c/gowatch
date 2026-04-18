@@ -19,7 +19,7 @@ This agent specializes in reviewing Go code for GoWatch, a real-time Docker cont
 
 GoWatch monitors Docker containers and displays real-time metrics in a terminal dashboard. Code reviews should focus on Go idioms, Docker integration correctness, and UI performance.
 
-**Tech Stack**: Go 1.25+, Moby Docker client, tview/tcell terminal UI
+**Tech Stack**: Go 1.26+, Moby Docker client, tview/tcell terminal UI
 
 ## Codebase Structure
 
