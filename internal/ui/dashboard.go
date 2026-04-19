@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/b92c/gowatch/internal/docker"
+	"github.com/b92c/gowatch/internal/filter"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -15,9 +16,13 @@ type Dashboard struct {
 	servicesTable *tview.Table
 	logsView      *tview.TextView
 	resourcesView *tview.TextView
+	helpBar       *tview.TextView
 	grid          *tview.Grid
+	searchField   *tview.InputField
+	filterState   filter.FilterState
 	userScrolling bool
 	firstRender   bool
+	filterMode    bool
 }
 
 func NewDashboard() *Dashboard {
@@ -40,12 +45,25 @@ func NewDashboard() *Dashboard {
 		SetDynamicColors(true)
 	resourcesView.SetBorder(true).SetTitle(" System Resources ").SetTitleAlign(tview.AlignLeft)
 
+	helpBar := tview.NewTextView().
+		SetDynamicColors(true).
+		SetText("[/][yellow] Search[white] | [f][yellow] Filter[white] | [Esc][yellow] Clear[white] | [↑↓][yellow] Scroll[white] | [q][yellow] Quit[white]")
+	helpBar.SetBorder(false).SetBackgroundColor(tcell.ColorBlack)
+
+	searchField := tview.NewInputField().
+		SetLabel("Search: ").
+		SetPlaceholder("name, id or image...").
+		SetFieldWidth(30)
+	searchField.SetBorder(true).SetTitle(" Filter ")
+
 	grid := tview.NewGrid().
-		SetRows(0, 0).
+		SetRows(0, 3, 0, 1).
 		SetColumns(0, 0).
 		AddItem(servicesTable, 0, 0, 1, 1, 0, 0, false).
 		AddItem(resourcesView, 0, 1, 1, 1, 0, 0, false).
-		AddItem(logsView, 1, 0, 1, 2, 0, 0, true)
+		AddItem(searchField, 1, 0, 1, 2, 0, 0, false).
+		AddItem(logsView, 2, 0, 1, 2, 0, 0, true).
+		AddItem(helpBar, 3, 0, 1, 2, 0, 0, false)
 
 	app.SetRoot(grid, true)
 	app.EnableMouse(true)
@@ -56,7 +74,10 @@ func NewDashboard() *Dashboard {
 		servicesTable: servicesTable,
 		logsView:      logsView,
 		resourcesView: resourcesView,
+		helpBar:       helpBar,
 		grid:          grid,
+		searchField:   searchField,
+		filterState:   filter.NewFilterState(),
 		userScrolling: false,
 		firstRender:   true,
 	}
@@ -77,9 +98,29 @@ func NewDashboard() *Dashboard {
 }
 
 func (d *Dashboard) Update(containers docker.Containers) {
-	d.updateServicesTable(containers)
-	d.updateResourcesView(containers.Host)
-	d.updateLogsView(containers)
+	filtered := filter.FilterContainers(containers, d.filterState)
+	d.updateServicesTable(filtered)
+	d.updateResourcesView(filtered.Host)
+	d.updateLogsView(filtered)
+}
+
+func (d *Dashboard) SetupInputCapture() {
+	d.searchField.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
+			d.filterState.Clear()
+			d.searchField.SetText("")
+			d.app.SetFocus(d.logsView)
+			d.filterMode = false
+			return nil
+		}
+		if event.Key() == tcell.KeyEnter {
+			d.filterState.SetSearch(d.searchField.GetText())
+			d.app.SetFocus(d.logsView)
+			d.filterMode = false
+			return nil
+		}
+		return event
+	})
 }
 
 func (d *Dashboard) updateServicesTable(containers docker.Containers) {
@@ -182,9 +223,37 @@ func (d *Dashboard) updateLogsView(containers docker.Containers) {
 }
 
 func (d *Dashboard) Run() error {
+	d.SetupInputCapture()
+	d.app.SetInputCapture(d.handleInput)
 	return d.app.Run()
 }
 
 func (d *Dashboard) Stop() {
 	d.app.Stop()
+}
+
+func (d *Dashboard) handleInput(event *tcell.EventKey) *tcell.EventKey {
+	if event.Key() == tcell.KeyRune {
+		switch event.Rune() {
+		case '/':
+			d.app.SetFocus(d.searchField)
+			d.filterMode = true
+			return nil
+		case 'f':
+			d.app.SetFocus(d.searchField)
+			d.filterMode = true
+			return nil
+		}
+	}
+	if event.Key() == tcell.KeyEscape {
+		if d.filterMode {
+			d.filterState.Clear()
+			d.searchField.SetText("")
+			d.app.SetFocus(d.logsView)
+			d.filterMode = false
+			return nil
+		}
+		d.filterState.Clear()
+	}
+	return event
 }
