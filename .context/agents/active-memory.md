@@ -1,79 +1,77 @@
 # Active Memory - GoWatch Session
 
 **Data**: 2026-04-18  
-**Status**: Em andamento - ponto de retomada preparado para amanha
+**Status**: Sessao atualizada - pronta para continuar nas proximas features
 
 ---
 
-## O que foi implementado hoje
+## O que foi entregue
 
-### Feature: P1.1 - Advanced Container Filtering & Search
+### P1.1 - Advanced Container Filtering & Search
+- `internal/filter/filter.go` criado com `FilterState` e filtros por texto/status/label.
+- `internal/ui/dashboard.go` ganhou `searchField`, `helpBar`, `filterState` e fluxo de busca com `/`, `f`, `Enter` e `Esc`.
+- O `Update()` agora aplica `FilterContainers(...)` antes de renderizar.
 
-#### Arquivo novo
-- `internal/filter/filter.go`
-  - `FilterState` com `SearchText`, `StatusFilter`, `LabelFilters`, `Active`
-  - `FilterContainers()` para aplicar filtros na lista de containers e logs agregados
-  - Metodos: `SetSearch()`, `SetStatusFilter()`, `SetLabelFilter()`, `Clear()`
+### P1.2 - Extended Metrics Collection
+- `internal/docker/parser.go` agora extrai:
+  - Network: bytes e pacotes Rx/Tx
+  - Disk: bytes e ops de leitura/escrita
+  - PIDs atuais
+  - Indicador de OOM
+- `internal/docker/collector.go` passou a propagar os novos campos em `ContainerStats` e `Container`.
+- A TUI exibiu novas colunas para essas métricas.
+- Testes de parsing foram adicionados em `internal/docker/parser_test.go`.
 
-#### Alteracoes em `internal/ui/dashboard.go`
-- Adicionado `helpBar` no rodape (`/` Search, `f` Filter, `Esc` Clear, `↑↓` Scroll, `q` Quit)
-- Adicionado `searchField` (`InputField`) para busca
-- Adicionado `filterState` no `Dashboard`
-- `Update()` agora aplica `filter.FilterContainers(...)` antes de renderizar
-- `SetupInputCapture()` no `searchField` para `Enter` (aplica filtro) e `Esc` (limpa)
-- `handleInput()` atualizado para entrar no modo de busca com `/` e `f`
-
----
-
-## Correcao aplicada no bug dos logs
-
-### Problema resolvido
-- Os logs deixaram de aparecer corretamente apos a integracao do campo de busca.
-
-### Causa raiz confirmada
-- O `logsView` estava em uma linha com altura fixa muito pequena no `tview.Grid`, o que espremia/invalidava a area util dos logs.
-
-### Fix aplicado
-- Ajuste do grid em `NewDashboard()`:
-  - de: `SetRows(0, 0, 1, 1)`
-  - para: `SetRows(0, 3, 0, 1)`
-- Resultado esperado de layout:
-  - Linha 0: Services + Resources
-  - Linha 1 (altura fixa): Search/Filter
-  - Linha 2 (flexivel): Logs
-  - Linha 3: Help bar
+### Layout da TUI
+- O grid foi refatorado para **uma coluna vertical**:
+  1. Docker Services
+  2. System Resources
+  3. Search/Filter
+  4. Logs
+  5. Help bar
+- Isso resolveu o problema de colunas comprimidas e deixou mais largura útil para os dados.
 
 ---
 
 ## Validacoes executadas
-
 - `make build` OK
 - `make test` OK
-- `make go-sec` OK (com ajuste de PATH para incluir `$(go env GOPATH)/bin`)
+- `make go-sec` OK
+- Smoke test com `./bin/gowatch` confirmou o layout vertical da TUI.
 
 ---
 
-## Proximos passos para amanha
+## Estado atual
+- Todos os todos criados para P1.1, P1.2 e refactor de layout estao concluídos.
+- A UI está estável com busca/filtro, métricas estendidas e layout vertical mais legível.
 
-1. Validar visualmente no terminal com `make run` se o comportamento esta 100% consistente (search em cima, logs abaixo, scroll funcional).
-2. Validar fluxo completo do filtro:
-   - `/` abre busca
-   - `Enter` aplica
-   - `Esc` limpa e volta foco para logs
-3. Se P1.1 estiver estavel, avancar para backlog da Fase 1:
-   - P1.2 (metricas estendidas)
-   - P1.3 (historico e trending)
-   - P1.4 (melhorias de logs)
+---
+
+## Proximos passos recomendados
+
+1. **P1.3 - Historical Data & Trending**
+   - armazenar histórico de métricas
+   - exibir tendência/mini gráficos
+   - preparar base para análise temporal
+
+2. **P1.4 - Log Management Enhancements**
+   - filtro por container/keyword
+   - parser de log level
+   - exportação e retenção de logs
+
+3. **Depois da Fase 1**
+   - **P2.1** configuração em arquivo
+   - **P2.2** temas/customização
+   - **P2.3** atalhos e ajuda dinâmica
 
 ---
 
 ## Notas tecnicas importantes
-
-- `tview.Grid` depende fortemente da combinacao de **row index + row size + span**.
-- Evitar sobreposicao de componentes na mesma celula/span.
-- `logsView` deve permanecer em linha flexivel (`0`) para renderizar volume de logs de forma adequada.
+- `tview.Grid` fica mais previsível com uma coluna única e blocos verticais.
+- Manter `logsView` flexível ajuda na leitura de grandes volumes de logs.
+- Métricas ausentes devem continuar exibindo zero explicitamente, sem fallback silencioso.
 
 ---
 
 **Encerrado em**: 2026-04-18  
-**Retomar por**: validar UX final de P1.1 no `make run` e seguir para P1.2
+**Retomar por**: iniciar P1.3 (historico/trending)

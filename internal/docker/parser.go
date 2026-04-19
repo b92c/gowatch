@@ -7,14 +7,27 @@ import (
 	"github.com/moby/moby/api/types/container"
 )
 
-func ParseStats(statsJSON container.StatsResponse) (cpu float64, mem uint64) {
+func ParseStats(statsJSON container.StatsResponse) ContainerStats {
+	parsed := ContainerStats{
+		MemUsage:       statsJSON.MemoryStats.Usage,
+		PIDsCurrent:    statsJSON.PidsStats.Current,
+		OOMEvents:      statsJSON.MemoryStats.Failcnt,
+		NetRxBytes:     parseNetworkRxBytes(statsJSON),
+		NetTxBytes:     parseNetworkTxBytes(statsJSON),
+		NetRxPackets:   parseNetworkRxPackets(statsJSON),
+		NetTxPackets:   parseNetworkTxPackets(statsJSON),
+		DiskReadBytes:  parseDiskReadBytes(statsJSON),
+		DiskWriteBytes: parseDiskWriteBytes(statsJSON),
+		DiskReadOps:    parseDiskReadOps(statsJSON),
+		DiskWriteOps:   parseDiskWriteOps(statsJSON),
+	}
+
 	if statsJSON.PreCPUStats.CPUUsage.TotalUsage == 0 || statsJSON.PreCPUStats.SystemUsage == 0 {
-		return 0.0, statsJSON.MemoryStats.Usage
+		return parsed
 	}
 
 	cpuDelta := float64(statsJSON.CPUStats.CPUUsage.TotalUsage - statsJSON.PreCPUStats.CPUUsage.TotalUsage)
 	systemDelta := float64(statsJSON.CPUStats.SystemUsage - statsJSON.PreCPUStats.SystemUsage)
-	cpuPercent := 0.0
 
 	var onlineCPUs float64
 	if statsJSON.CPUStats.OnlineCPUs != 0 {
@@ -24,12 +37,82 @@ func ParseStats(statsJSON container.StatsResponse) (cpu float64, mem uint64) {
 	}
 
 	if systemDelta > 0.0 && cpuDelta > 0.0 {
-		cpuPercent = (cpuDelta / systemDelta) * onlineCPUs * 100.0
+		parsed.CPUPercent = (cpuDelta / systemDelta) * onlineCPUs * 100.0
 	}
 
-	memUsage := statsJSON.MemoryStats.Usage
+	return parsed
+}
 
-	return cpuPercent, memUsage
+func parseNetworkRxBytes(statsJSON container.StatsResponse) uint64 {
+	var total uint64
+	for _, stats := range statsJSON.Networks {
+		total += stats.RxBytes
+	}
+	return total
+}
+
+func parseNetworkTxBytes(statsJSON container.StatsResponse) uint64 {
+	var total uint64
+	for _, stats := range statsJSON.Networks {
+		total += stats.TxBytes
+	}
+	return total
+}
+
+func parseNetworkRxPackets(statsJSON container.StatsResponse) uint64 {
+	var total uint64
+	for _, stats := range statsJSON.Networks {
+		total += stats.RxPackets
+	}
+	return total
+}
+
+func parseNetworkTxPackets(statsJSON container.StatsResponse) uint64 {
+	var total uint64
+	for _, stats := range statsJSON.Networks {
+		total += stats.TxPackets
+	}
+	return total
+}
+
+func parseDiskReadBytes(statsJSON container.StatsResponse) uint64 {
+	var total uint64
+	for _, entry := range statsJSON.BlkioStats.IoServiceBytesRecursive {
+		if strings.EqualFold(entry.Op, "read") {
+			total += entry.Value
+		}
+	}
+	return total
+}
+
+func parseDiskWriteBytes(statsJSON container.StatsResponse) uint64 {
+	var total uint64
+	for _, entry := range statsJSON.BlkioStats.IoServiceBytesRecursive {
+		if strings.EqualFold(entry.Op, "write") {
+			total += entry.Value
+		}
+	}
+	return total
+}
+
+func parseDiskReadOps(statsJSON container.StatsResponse) uint64 {
+	var total uint64
+	for _, entry := range statsJSON.BlkioStats.IoServicedRecursive {
+		if strings.EqualFold(entry.Op, "read") {
+			total += entry.Value
+		}
+	}
+	return total
+}
+
+func parseDiskWriteOps(statsJSON container.StatsResponse) uint64 {
+	var total uint64
+	for _, entry := range statsJSON.BlkioStats.IoServicedRecursive {
+		if strings.EqualFold(entry.Op, "write") {
+			total += entry.Value
+		}
+	}
+	return total
 }
 
 func ParseLogs(rawLogs io.ReadCloser) []string {

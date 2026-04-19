@@ -18,8 +18,18 @@ type HostInfo struct {
 }
 
 type ContainerStats struct {
-	CPUPercent float64
-	MemUsage   uint64
+	CPUPercent     float64
+	MemUsage       uint64
+	NetRxBytes     uint64
+	NetTxBytes     uint64
+	NetRxPackets   uint64
+	NetTxPackets   uint64
+	DiskReadBytes  uint64
+	DiskWriteBytes uint64
+	DiskReadOps    uint64
+	DiskWriteOps   uint64
+	PIDsCurrent    uint64
+	OOMEvents      uint64
 }
 
 type ContainerLog struct {
@@ -40,13 +50,13 @@ var (
 func getContainerStats(ctx context.Context, apiClient *client.Client, containerID string) ContainerStats {
 	stats, err := apiClient.ContainerStats(ctx, containerID, client.ContainerStatsOptions{Stream: false})
 	if err != nil {
-		return ContainerStats{CPUPercent: 0, MemUsage: 0}
+		return ContainerStats{}
 	}
 	defer stats.Body.Close()
 
 	var statsJSON container.StatsResponse
 	if err := json.NewDecoder(stats.Body).Decode(&statsJSON); err != nil {
-		return ContainerStats{CPUPercent: 0, MemUsage: 0}
+		return ContainerStats{}
 	}
 
 	statsMutex.Lock()
@@ -57,8 +67,7 @@ func getContainerStats(ctx context.Context, apiClient *client.Client, containerI
 	previousStats[containerID] = statsJSON
 	statsMutex.Unlock()
 
-	cpuPercent, memUsage := ParseStats(statsJSON)
-	return ContainerStats{CPUPercent: cpuPercent, MemUsage: memUsage}
+	return ParseStats(statsJSON)
 }
 
 func getContainerLogs(ctx context.Context, apiClient *client.Client, containerID string) []string {
@@ -94,20 +103,30 @@ type Containers struct {
 }
 
 type Container struct {
-	Service    string
-	SOVersion  string
-	Status     string
-	State      string
-	Command    string
-	DependsOn  string
-	WorkingDir string
-	ID         string
-	Image      string
-	ConfigFile string
-	Log        []string
-	MemUsage   uint64
-	CPUPercent float64
-	CreatedAt  int64
+	Service        string
+	SOVersion      string
+	Status         string
+	State          string
+	Command        string
+	DependsOn      string
+	WorkingDir     string
+	ID             string
+	Image          string
+	ConfigFile     string
+	Log            []string
+	MemUsage       uint64
+	CPUPercent     float64
+	NetRxBytes     uint64
+	NetTxBytes     uint64
+	NetRxPackets   uint64
+	NetTxPackets   uint64
+	DiskReadBytes  uint64
+	DiskWriteBytes uint64
+	DiskReadOps    uint64
+	DiskWriteOps   uint64
+	PIDsCurrent    uint64
+	OOMEvents      uint64
+	CreatedAt      int64
 }
 
 func WatchContainers(ctx context.Context, apiClient *client.Client) (Containers, error) {
@@ -126,10 +145,20 @@ func WatchContainers(ctx context.Context, apiClient *client.Client) (Containers,
 			Service:    c.Labels["com.docker.compose.service"],
 			SOVersion:  c.Labels["org.opencontainers.image.ref.name"] + " " + c.Labels["org.opencontainers.image.version"],
 			WorkingDir: c.Labels["com.docker.compose.project.working_dir"], ConfigFile: c.Labels["com.docker.compose.project.config_files"],
-			CreatedAt:  c.Created,
-			CPUPercent: stat.CPUPercent,
-			MemUsage:   stat.MemUsage,
-			Log:        logs,
+			CreatedAt:      c.Created,
+			CPUPercent:     stat.CPUPercent,
+			MemUsage:       stat.MemUsage,
+			NetRxBytes:     stat.NetRxBytes,
+			NetTxBytes:     stat.NetTxBytes,
+			NetRxPackets:   stat.NetRxPackets,
+			NetTxPackets:   stat.NetTxPackets,
+			DiskReadBytes:  stat.DiskReadBytes,
+			DiskWriteBytes: stat.DiskWriteBytes,
+			DiskReadOps:    stat.DiskReadOps,
+			DiskWriteOps:   stat.DiskWriteOps,
+			PIDsCurrent:    stat.PIDsCurrent,
+			OOMEvents:      stat.OOMEvents,
+			Log:            logs,
 		})
 	}
 	containers.Host = getHostInfo()

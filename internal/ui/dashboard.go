@@ -53,17 +53,17 @@ func NewDashboard() *Dashboard {
 	searchField := tview.NewInputField().
 		SetLabel("Search: ").
 		SetPlaceholder("name, id or image...").
-		SetFieldWidth(30)
+		SetFieldWidth(0)
 	searchField.SetBorder(true).SetTitle(" Filter ")
 
 	grid := tview.NewGrid().
-		SetRows(0, 3, 0, 1).
-		SetColumns(0, 0).
+		SetRows(0, 0, 3, 0, 1).
+		SetColumns(0).
 		AddItem(servicesTable, 0, 0, 1, 1, 0, 0, false).
-		AddItem(resourcesView, 0, 1, 1, 1, 0, 0, false).
-		AddItem(searchField, 1, 0, 1, 2, 0, 0, false).
-		AddItem(logsView, 2, 0, 1, 2, 0, 0, true).
-		AddItem(helpBar, 3, 0, 1, 2, 0, 0, false)
+		AddItem(resourcesView, 1, 0, 1, 1, 0, 0, false).
+		AddItem(searchField, 2, 0, 1, 1, 0, 0, false).
+		AddItem(logsView, 3, 0, 1, 1, 0, 0, true).
+		AddItem(helpBar, 4, 0, 1, 1, 0, 0, false)
 
 	app.SetRoot(grid, true)
 	app.EnableMouse(true)
@@ -127,7 +127,7 @@ func (d *Dashboard) updateServicesTable(containers docker.Containers) {
 	d.servicesTable.Clear()
 
 	// Headers
-	headers := []string{"Service", "State", "Image", "CPU %", "Memory", "Logs"}
+	headers := []string{"Service", "State", "Image", "CPU %", "Memory", "Net Bytes (Rx/Tx)", "Net Pkts (Rx/Tx)", "Disk Bytes (R/W)", "Disk Ops (R/W)", "PIDs", "OOM", "Logs"}
 	for i, header := range headers {
 		d.servicesTable.SetCell(0, i,
 			tview.NewTableCell(header).
@@ -150,7 +150,17 @@ func (d *Dashboard) updateServicesTable(containers docker.Containers) {
 
 		memMB := fmt.Sprintf("%.2f MB", float64(c.MemUsage)/1024/1024)
 		cpuStr := fmt.Sprintf("%.2f", c.CPUPercent)
+		netBytes := fmt.Sprintf("%s/%s", formatBytes(c.NetRxBytes), formatBytes(c.NetTxBytes))
+		netPackets := fmt.Sprintf("%d/%d", c.NetRxPackets, c.NetTxPackets)
+		diskBytes := fmt.Sprintf("%s/%s", formatBytes(c.DiskReadBytes), formatBytes(c.DiskWriteBytes))
+		diskOps := fmt.Sprintf("%d/%d", c.DiskReadOps, c.DiskWriteOps)
+		pids := fmt.Sprintf("%d", c.PIDsCurrent)
+		oomEvents := fmt.Sprintf("%d", c.OOMEvents)
 		logCount := fmt.Sprintf("%d lines", len(c.Log))
+		oomColor := tcell.ColorGreen
+		if c.OOMEvents > 0 {
+			oomColor = tcell.ColorRed
+		}
 
 		cells := []struct {
 			text  string
@@ -161,6 +171,12 @@ func (d *Dashboard) updateServicesTable(containers docker.Containers) {
 			{c.Image, tcell.ColorLightBlue},
 			{cpuStr, tcell.ColorWhite},
 			{memMB, tcell.ColorWhite},
+			{netBytes, tcell.ColorWhite},
+			{netPackets, tcell.ColorWhite},
+			{diskBytes, tcell.ColorWhite},
+			{diskOps, tcell.ColorWhite},
+			{pids, tcell.ColorWhite},
+			{oomEvents, oomColor},
 			{logCount, tcell.ColorGray},
 		}
 
@@ -171,6 +187,21 @@ func (d *Dashboard) updateServicesTable(containers docker.Containers) {
 					SetAlign(tview.AlignLeft))
 		}
 	}
+}
+
+func formatBytes(value uint64) string {
+	const unit = 1024.0
+	bytes := float64(value)
+	if bytes < unit {
+		return fmt.Sprintf("%d B", value)
+	}
+	if bytes < unit*unit {
+		return fmt.Sprintf("%.1f KB", bytes/unit)
+	}
+	if bytes < unit*unit*unit {
+		return fmt.Sprintf("%.1f MB", bytes/(unit*unit))
+	}
+	return fmt.Sprintf("%.1f GB", bytes/(unit*unit*unit))
 }
 
 func (d *Dashboard) updateResourcesView(host docker.HostInfo) {
