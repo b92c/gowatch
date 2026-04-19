@@ -7,9 +7,9 @@ import (
 )
 
 type FilterState struct {
+	LabelFilters map[string]string
 	SearchText   string
 	StatusFilter []string
-	LabelFilters map[string]string
 	Active       bool
 }
 
