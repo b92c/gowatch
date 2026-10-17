@@ -47,7 +47,7 @@ func DefaultYAML() []byte {
 	b.WriteString(`
 # Filters applied when GoWatch starts. Esc in the dashboard clears all of them.
 filters:
-  search: ""          # matches service name, container ID or image
+  search: ""          # matches service name, container ID or image; also shows the log lines that contain it
   min_log_level: ""   # info | warn | error (empty shows every level)
   status: []          # container states to show, for example [running, exited]
 
@@ -143,8 +143,9 @@ layout:
 #   quit                   q         quit GoWatch
 #   docker_view            d, D      show the Docker services
 #   aws_view               a, A      show the AWS resources
-#   search                 /, f      focus the search field
+#   search                 /, f      focus the search field (matches services and log text)
 #   cycle_log_level        l, L      cycle the minimum log level
+#   export_logs            e, E      export the shown logs to JSON
 #   clear_filter           esc       clear all filters (closes the alerts list first)
 #   toggle_alerts          w, W      show or hide the alerts list
 #   clear_resolved_alerts  c, C      clear the resolved alerts

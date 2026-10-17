@@ -25,6 +25,7 @@ const (
 	ActionAWSView             Action = "aws_view"
 	ActionSearch              Action = "search"
 	ActionCycleLogLevel       Action = "cycle_log_level"
+	ActionExportLogs          Action = "export_logs"
 	ActionClearFilter         Action = "clear_filter"
 	ActionToggleAlerts        Action = "toggle_alerts"
 	ActionClearResolvedAlerts Action = "clear_resolved_alerts"
@@ -59,8 +60,9 @@ var actionTable = []actionInfo{
 	{action: ActionQuit, group: groupGeneral, description: "Quit GoWatch"},
 	{action: ActionDockerView, group: groupViews, description: "Show the Docker services"},
 	{action: ActionAWSView, group: groupViews, description: "Show the AWS resources"},
-	{action: ActionSearch, group: groupFilters, description: "Search by service name, ID or image"},
+	{action: ActionSearch, group: groupFilters, description: "Search by service, ID, image or log text"},
 	{action: ActionCycleLogLevel, group: groupFilters, description: "Cycle the minimum log level"},
+	{action: ActionExportLogs, group: groupFilters, description: "Export the shown logs to JSON"},
 	{action: ActionClearFilter, group: groupFilters, description: "Clear all filters (closes the alerts list first)"},
 	{action: ActionToggleAlerts, group: groupAlerts, description: "Show or hide the alerts list"},
 	{action: ActionClearResolvedAlerts, group: groupAlerts, description: "Clear the resolved alerts"},
@@ -356,6 +358,7 @@ var defaultPreset = map[Action][]string{
 	ActionAWSView:             {"a", "A"},
 	ActionSearch:              {"/", "f"},
 	ActionCycleLogLevel:       {"l", "L"},
+	ActionExportLogs:          {"e", "E"},
 	ActionClearFilter:         {"esc"},
 	ActionToggleAlerts:        {"w", "W"},
 	ActionClearResolvedAlerts: {"c", "C"},

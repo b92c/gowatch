@@ -59,6 +59,7 @@ GoWatch provides a real-time terminal dashboard with three main sections:
 - Color-coded output
 - Real-time log streaming
 - Service name identification
+- Keyword search and JSON export (see [Searching and exporting logs](#searching-and-exporting-logs))
 
 ### Dashboard Example
 
@@ -204,7 +205,7 @@ history:
   max_points: 60           # samples kept for the CPU/memory sparklines (10-3600)
 
 filters:                   # applied at startup; Esc in the dashboard clears all of them
-  search: ""               # matches service name, container ID or image
+  search: ""               # matches service name, container ID or image; also shows the log lines that contain it
   min_log_level: ""        # info | warn | error (empty shows every level)
   status: []               # container states to show, for example [running, exited]
 
@@ -305,8 +306,9 @@ keybindings:
 | `quit` | Quit GoWatch | `q` | `q` |
 | `docker_view` | Show the Docker services | `d`, `D` | `d`, `D` |
 | `aws_view` | Show the AWS resources | `a`, `A` | `a`, `A` |
-| `search` | Focus the search field | `/`, `f` | `/`, `f` |
+| `search` | Focus the search field (searches services and log text) | `/`, `f` | `/`, `f` |
 | `cycle_log_level` | Cycle the minimum log level | `l`, `L` | `l`, `L` |
+| `export_logs` | Export the logs on screen to a JSON file in the current directory (not while the search field has the focus) | `e`, `E` | `e`, `E` |
 | `clear_filter` | Clear all filters, including the ones from the config file (closes the alerts list first when it is open) | `Esc` | `Esc` |
 | `toggle_alerts` | Show or hide the alerts list | `w`, `W` | `w`, `W` |
 | `clear_resolved_alerts` | Clear the resolved alerts (works on every screen) | `c`, `C` | `c`, `C` |
@@ -330,6 +332,40 @@ The `vim` preset is the `default` preset plus `j`, `k`, `g`, `G`, `Ctrl+D` and `
 **Help page.** `?` (the `help` action) opens a page that lists every action by section with the keys in use, so remapped keys show up as you set them, followed by the keys that always work. It opens over the alerts list too, and goes back to it when it closes. The page closes with the keys of the `help` and `quit` actions and with `Esc`, and quitting does not happen while it is open. No other action runs while it is open (the view cannot change behind it, and the search does not open).
 
 **Help bar.** The bar at the bottom and the title of the alerts list show the first key of each action, so they follow your bindings. With the default keys the bar is the original one with one more entry, `? Help`, between `↑↓ Scroll` and `q Quit`.
+
+### Searching and exporting logs
+
+**Search.** Press `/` or `f` and type. The search is case-insensitive and looks at two things:
+
+- The services table lists the containers whose service name, container ID or image contains the text (and that pass the status filter).
+- The logs panel shows every log line of those containers, plus the lines of any other container whose text contains the search text. The minimum log level (`l`) applies to every line. With an empty search nothing changes. `Esc` clears the search and every other filter.
+
+**Export.** Press `e` (or `E`) to write the log lines that are on screen, after the search and the minimum log level, to a JSON file in the directory GoWatch was started from (its current working directory). The file is named `gowatch-logs-YYYYMMDD-HHMMSS.json` (local time); if that name is taken, `-1`, `-2` and so on are added before `.json`, and an existing file is never overwritten. The file can be read by its owner only (mode `0600`). It works whether or not the logs panel is hidden, and from the AWS view too. For about 5 seconds the help bar shows `Logs exported to <file name> (<n> lines)`, or `Log export failed: <reason>`, and then goes back to normal. The key is typed into the search field while that field has the focus, so press `Enter` first (`Esc` also leaves the field, but it clears the filters).
+
+```json
+{
+  "exported_at": "2026-10-17T15:30:45-03:00",
+  "filters": {
+    "search": "api",
+    "min_log_level": "WARN"
+  },
+  "count": 2,
+  "logs": [
+    {
+      "service": "api",
+      "level": "ERROR",
+      "line": "connection refused"
+    },
+    {
+      "service": "worker",
+      "level": "WARN",
+      "line": "retrying the call to the api"
+    }
+  ]
+}
+```
+
+`exported_at` is RFC 3339. `search` is the text in the search field and `min_log_level` is the minimum level (`INFO`, `WARN` or `ERROR`); both are always present and are empty strings when no search text or minimum level is set. `level` is `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR` or `FATAL`, and is left out for a line whose level could not be read. `logs` is `[]` when nothing is on screen. The lines are the raw log text, in the order they are shown.
 
 ## Use Cases
 

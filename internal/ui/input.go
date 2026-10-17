@@ -58,11 +58,13 @@ func (d *Dashboard) handleHelpInput(event *tcell.EventKey) *tcell.EventKey {
 func (d *Dashboard) runAction(action Action) {
 	switch action {
 	case ActionQuit:
-		d.app.Stop()
+		d.Stop()
 	case ActionSearch:
 		d.app.SetFocus(d.searchField)
 	case ActionCycleLogLevel:
 		d.filterState.CycleMinLogLevel()
+	case ActionExportLogs:
+		d.exportLogs()
 	case ActionDockerView:
 		d.awsViewMode = false
 	case ActionAWSView:

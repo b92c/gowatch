@@ -97,7 +97,7 @@ func TestHelpPageShowsTheDefaultKeys(t *testing.T) {
 		{"Quit GoWatch", "q"},
 		{"Show the Docker services", "d, D"},
 		{"Show the AWS resources", "a, A"},
-		{"Search by service name, ID or image", "/, f"},
+		{"Search by service, ID, image or log text", "/, f"},
 		{"Cycle the minimum log level", "l, L"},
 		{"Clear all filters", "Esc"},
 		{"Show or hide the alerts list", "w, W"},
@@ -143,7 +143,7 @@ func TestHelpPageShowsRemappedKeys(t *testing.T) {
 	}{
 		{"Quit GoWatch", "x, Ctrl+Q", "q,"},
 		{"Show or hide this help", "h", "?"},
-		{"Search by service name, ID or image", "[", "/"},
+		{"Search by service, ID, image or log text", "[", "/"},
 		{"Scroll down one line", "↓, j", ""},
 		{"Scroll up one line", "↑, k", ""},
 		{"Jump to the top", "Home, g", ""},
@@ -196,7 +196,7 @@ func TestHelpPageUsesTheThemeColors(t *testing.T) {
 
 func TestHelpPageEscapesBracketKeys(t *testing.T) {
 	shot := helpScreen(t, config.KeybindingsConfig{Bindings: map[string][]string{"search": {"[", "]"}}})
-	row := lineOf(t, shot, "Search by service name")
+	row := lineOf(t, shot, "Search by service, ID")
 	if !strings.Contains(row, "[, ]") {
 		t.Errorf("row of the search action = %q, want the keys [ and ] drawn", strings.TrimSpace(row))
 	}

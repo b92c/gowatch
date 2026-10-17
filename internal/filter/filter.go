@@ -75,6 +75,13 @@ func (f *FilterState) Clear() {
 	f.Active = false
 }
 
+// FilterContainers applies the filters to the containers and their logs.
+//
+// The search text works on two levels. A container whose service name, ID or
+// image contains it (ignoring case) is listed, and all of its log lines are
+// shown. A container that does not match is not listed, but the lines of its
+// logs that contain the text are still shown, as long as it passes the status
+// and label filters. The minimum log level applies to every line.
 func FilterContainers(containers docker.Containers, filter FilterState) docker.Containers {
 	if !filter.Active {
 		return containers
@@ -85,12 +92,17 @@ func FilterContainers(containers docker.Containers, filter FilterState) docker.C
 	filtered.Traces = containers.Traces
 	filtered.AWS = containers.AWS
 
+	searchLower := strings.ToLower(filter.SearchText)
+
 	for _, c := range containers.C {
-		if !matchesFilter(c, filter) {
+		if !matchesStatusAndLabels(c, filter) {
 			continue
 		}
 
-		filtered.C = append(filtered.C, c)
+		listed := matchesSearch(c, searchLower)
+		if listed {
+			filtered.C = append(filtered.C, c)
+		}
 
 		serviceName := c.Service
 		if serviceName == "" {
@@ -102,6 +114,9 @@ func FilterContainers(containers docker.Containers, filter FilterState) docker.C
 		}
 
 		for _, line := range c.Log {
+			if !listed && !strings.Contains(strings.ToLower(line), searchLower) {
+				continue
+			}
 			level := docker.ParseLogLevel(line)
 			if filter.MinLogLevel > metrics.LogLevelUnknown && level < filter.MinLogLevel {
 				continue
@@ -117,22 +132,20 @@ func FilterContainers(containers docker.Containers, filter FilterState) docker.C
 	return filtered
 }
 
-func matchesFilter(c docker.Container, filter FilterState) bool {
-	if filter.SearchText != "" {
-		searchLower := strings.ToLower(filter.SearchText)
-		match := false
-		if strings.Contains(strings.ToLower(c.Service), searchLower) {
-			match = true
-		} else if strings.Contains(strings.ToLower(c.ID), searchLower) {
-			match = true
-		} else if strings.Contains(strings.ToLower(c.Image), searchLower) {
-			match = true
-		}
-		if !match {
-			return false
-		}
+// matchesSearch reports whether the container's service name, ID or image
+// contains the search text. searchLower is already lower case; an empty search
+// matches every container.
+func matchesSearch(c docker.Container, searchLower string) bool {
+	if searchLower == "" {
+		return true
 	}
+	return strings.Contains(strings.ToLower(c.Service), searchLower) ||
+		strings.Contains(strings.ToLower(c.ID), searchLower) ||
+		strings.Contains(strings.ToLower(c.Image), searchLower)
+}
 
+// matchesStatusAndLabels applies the status and label filters.
+func matchesStatusAndLabels(c docker.Container, filter FilterState) bool {
 	if len(filter.StatusFilter) > 0 {
 		found := false
 		for _, status := range filter.StatusFilter {

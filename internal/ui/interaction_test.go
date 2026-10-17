@@ -303,7 +303,7 @@ func TestLiveBracketKeysShowInTheHelpBarAndPage(t *testing.T) {
 		t.Errorf("help bar = %q, want the bracket keys drawn", strings.TrimSpace(bar))
 	}
 	l.pressRune('?')
-	if row := lineOf(t, l.shot(), "Search by service name"); !strings.Contains(row, "[, ]") {
+	if row := lineOf(t, l.shot(), "Search by service, ID"); !strings.Contains(row, "[, ]") {
 		t.Errorf("help page row = %q, want the bracket keys drawn", strings.TrimSpace(row))
 	}
 	l.pressRune('?')

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -152,7 +153,7 @@ func (l *liveDashboard) running() bool {
 }
 
 func (l *liveDashboard) stop() {
-	l.d.app.Stop()
+	l.d.Stop()
 	if !l.waitForExit() {
 		l.t.Error("the dashboard did not stop")
 	}
@@ -190,4 +191,28 @@ func logsOf(n int) docker.Containers {
 		c.FlatLogs = append(c.FlatLogs, docker.FormattedLog{Service: "web", Line: fmt.Sprintf("line %03d", i), Level: metrics.LogLevelInfo})
 	}
 	return c
+}
+
+// shotOnLoop copies the screen from the application's goroutine, which is the
+// one that draws, so that it is safe while a timer may be redrawing.
+func (l *liveDashboard) shotOnLoop() screenshot {
+	l.t.Helper()
+	var s screenshot
+	l.do(func() { s = l.shot() })
+	return s
+}
+
+// shotHas polls the screen until it shows text, or the wait runs out.
+func (l *liveDashboard) shotHas(text string, within time.Duration) bool {
+	l.t.Helper()
+	deadline := time.Now().Add(within)
+	for {
+		if strings.Contains(l.shotOnLoop().text(), text) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
