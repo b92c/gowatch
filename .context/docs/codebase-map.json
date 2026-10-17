@@ -59,7 +59,7 @@
       },
       {
         "name": "internal/aws",
-        "description": "AWS integrations: client manager and the CloudWatch, Lambda, X-Ray and CloudFormation collector types",
+        "description": "AWS structure only: client manager and the CloudWatch, Lambda, X-Ray and CloudFormation collectors. The collectors return fixed sample data and nothing outside the tests calls them; the AWS SDK is not a dependency",
         "fileCount": 5,
         "files": ["client.go", "cloudwatch.go", "lambda.go", "xray.go", "cloudformation.go"]
       },
@@ -159,14 +159,14 @@
     {
       "name": "OTLP Receiver",
       "path": "internal/trace/exporter.go",
-      "description": "OTLP/HTTP JSON trace receiver and the trace exporter",
+      "description": "OTLP/HTTP JSON trace receiver (started by main when enabled) and the trace exporter (nothing outside the tests calls it)",
       "exports": ["OTLPReceiver", "NewOTLPReceiver", "Exporter", "NewExporter"],
       "dependencies": ["internal/trace"]
     },
     {
       "name": "AWS Client Manager",
       "path": "internal/aws/client.go",
-      "description": "AWS connection state and options (AWS_* environment variables take priority over the config file); the CloudWatch, Lambda, X-Ray and CloudFormation collectors live in the same package",
+      "description": "AWS connection state and options (AWS_* environment variables take priority over the config file); the CloudWatch, Lambda, X-Ray and CloudFormation collectors live in the same package, return fixed sample data and are not called outside the tests",
       "exports": ["AWSClientManager", "NewAWSClientManager", "NewAWSClientManagerWithOptions", "Options", "AWSResource", "AWSState"],
       "dependencies": []
     },
@@ -227,7 +227,7 @@
     },
     {
       "step": 7,
-      "description": "The collector lists containers, fetches stats and logs for each, correlates traces from the log lines, evaluates the alert rules and reads the AWS state"
+      "description": "The collector lists containers, fetches stats and logs for each, correlates traces from the log lines, evaluates the alert rules and reads the AWS state (its resource list is always empty today)"
     },
     {
       "step": 8,

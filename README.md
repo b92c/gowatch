@@ -43,7 +43,7 @@ docker compose up
 GoWatch provides a real-time terminal dashboard with three main sections:
 
 **Docker Services Table** - View all running containers with:
-- Container status (Running, Stopped, etc.)
+- Container state (running, paused or restarting; stopped containers are not listed)
 - Container image information
 - CPU usage percentage
 - Memory consumption (MB)
@@ -254,9 +254,11 @@ keybindings:               # keyboard shortcuts, see "Keybindings" below
 
 **Alert rules.** The built-in rules are `high_cpu`, `high_mem`, `oom_killed` and `container_down`. Under `alerts.rules` you can change `threshold`, `hysteresis`, `consecutive_hits` and `severity` of a rule, or drop it with `enabled: false`. `threshold` and `hysteresis` must be finite numbers >= 0, and `hysteresis` must not exceed `threshold`; if you change `threshold` and leave `hysteresis` out, the built-in hysteresis is lowered to match when needed. Write each rule ID once per file (`high_cpu` and `HIGH_CPU` count as the same rule). If the same rule appears in both config files, the two entries are combined field by field.
 
-**OTLP receiver.** When `tracing.otlp_receiver.enabled` is `true`, GoWatch listens on `address` and accepts OTLP/HTTP JSON traces on `/v1/traces`, which then show up in the dashboard. The receiver can only be turned on from `~/.gowatch/config.yaml` or a `--config` file, not from `./gowatch.yaml`. If the address cannot be bound, GoWatch exits with an error before the dashboard opens.
+**OTLP receiver.** When `tracing.otlp_receiver.enabled` is `true`, GoWatch listens on `address` and accepts OTLP/HTTP JSON traces on `/v1/traces`, which then show up in the dashboard. Traces are also built from Docker log lines that carry trace context (a W3C `traceparent`, a `trace_id`/`traceId` field, or a `request_id=` key), with or without the receiver. The receiver can only be turned on from `~/.gowatch/config.yaml` or a `--config` file, not from `./gowatch.yaml`. If the address cannot be bound, GoWatch exits with an error before the dashboard opens.
 
-**AWS.** `aws.region` and `aws.endpoint_url` are used when the corresponding environment variables are not set (`AWS_REGION`, then `AWS_DEFAULT_REGION`, then the config file, then `us-east-1`; `AWS_ENDPOINT_URL` before the config file). With `enabled: auto` the AWS integration is on when `AWS_ACCESS_KEY_ID`, `AWS_PROFILE`, `AWS_REGION` or `AWS_ENDPOINT_URL` is set, or when the config file sets `region` or `endpoint_url`. `enabled: true` or `enabled: false` always wins.
+**AWS.** `aws.region` and `aws.endpoint_url` are used when the corresponding environment variables are not set (`AWS_REGION`, then `AWS_DEFAULT_REGION`, then the config file, then `us-east-1`; `AWS_ENDPOINT_URL` before the config file). With `enabled: auto` the AWS integration is marked as enabled when `AWS_ACCESS_KEY_ID`, `AWS_PROFILE`, `AWS_REGION` or `AWS_ENDPOINT_URL` is set, or when the config file sets `region` or `endpoint_url`. `enabled: true` or `enabled: false` always wins.
+
+**Known limitation (AWS).** GoWatch does not call AWS yet: the AWS SDK is not part of it, and the CloudWatch, Lambda, X-Ray and CloudFormation code returns fixed sample data that nothing reads. The `aws` settings and the `AWS_*` variables are accepted and checked, so a config file that sets them stays valid, but they only change an internal state, and the only part of it the dashboard shows is the region. The AWS view (`a`) always shows an empty table, with that region in its title.
 
 **Themes.** `theme.name` picks one of the built-in themes: `dark` (the default, and the look GoWatch has always had), `light`, `solarized` (Solarized Dark) or `nord`. The `--theme` flag replaces the name from the file. Names are case-insensitive, and an unknown name stops GoWatch at startup with the list of valid ones. The light, solarized and nord themes use true-color values, so they look best in a terminal with true-color support.
 
@@ -281,7 +283,7 @@ keybindings:               # keyboard shortcuts, see "Keybindings" below
 
 The colors that tell services apart in the logs come from the theme and cannot be overridden one by one.
 
-**Known limitations.** The log level badges (`[INFO]`, `[WARN]`, `[ERROR]`, `[FATAL]`...) are not drawn: the terminal UI library reads text between square brackets as a color tag, so the badge text never appears in the log lines. That is how GoWatch has always drawn them, and showing them would change the default look, so it has not been changed. As a result, `log_error`, `log_warn`, `log_info`, `log_debug` and `log_fatal_text` have no visible effect yet, and `log_fatal` only colors the background of the rest of a FATAL log line. The roles are kept so that a config file that sets them keeps working if the badges become visible. A related case: the root operation of the recent traces (shown only when the OTLP receiver is on) is drawn in the terminal's default text color in every theme, so it can be hard to read with the `light` theme in a dark terminal, or with `solarized` or `nord` in a light one.
+**Known limitations.** The log level badges (`[INFO]`, `[WARN]`, `[ERROR]`, `[FATAL]`...) are not drawn: the terminal UI library reads text between square brackets as a color tag, so the badge text never appears in the log lines. That is how GoWatch has always drawn them, and showing them would change the default look, so it has not been changed. As a result, `log_error`, `log_warn`, `log_info`, `log_debug` and `log_fatal_text` have no visible effect yet, and `log_fatal` only colors the background of the rest of a FATAL log line. The roles are kept so that a config file that sets them keeps working if the badges become visible. A related case: the root operation of the recent traces (shown whenever there are traces, from the OTLP receiver or from log lines) is drawn in the terminal's default text color in every theme, so it can be hard to read with the `light` theme in a dark terminal, or with `solarized` or `nord` in a light one.
 
 **Layout.** `layout` describes the panels from top to bottom: the services table, system resources, the search field, the logs and the help bar. `height` is the share of the free space a panel gets compared to the others, from 1 to 100: with every height at 1 the panels are equal, and `height: 2` gives a panel twice the space. `0` or no value counts as 1. The search field (3 rows) and the help bar (1 row) have a fixed height. `visible: false` removes the system resources, the logs or the help bar from the screen; the services table and the search field are always shown. With the logs hidden, the focus starts on the services table and goes back to it after `Esc`, `Enter` or closing the alerts modal. The layout is read at startup; panels cannot be toggled while GoWatch runs.
 
@@ -315,7 +317,7 @@ keybindings:
 | `scroll_top` | Jump to the top | `Home` | `Home`, `g` |
 | `scroll_bottom` | Jump to the bottom | `End` | `End`, `G` |
 
-The `vim` preset is the `default` preset plus `j`, `k`, `g`, `G`, `Ctrl+D` and `Ctrl+U`. `Ctrl+D` and `Ctrl+U` move a whole page, the height of the logs panel, not half a page as in vim. There is no `emacs` preset.
+The `vim` preset is the `default` preset plus `j`, `k`, `g`, `G`, `Ctrl+D` and `Ctrl+U`. `Ctrl+D` and `Ctrl+U` move a whole page, the height of the logs panel, not half a page as in vim. There is no `emacs` preset. The AWS view (`aws_view`) has no data yet: see the AWS limitation under Options.
 
 **Keys.** A key is a single character (`q`, `/`, `?`, `G`; upper and lower case are different keys, so `l` and `L` are listed separately), `ctrl+<letter>` (`ctrl+d`), `space`, or one of `esc` (or `escape`), `enter`, `tab`, `up`, `down`, `pgup`, `pgdn`, `home` and `end`. The names are case-insensitive. Quote the keys in YAML, because characters such as `?`, `#`, `,` and `[` mean something to it: `["?", "#"]`. Action names are written in lower case with underscores (`Quit` also works).
 
@@ -337,7 +339,7 @@ GoWatch is ideal for:
 - **Performance Debugging**: Quickly identify which containers are consuming excessive CPU or memory
 - **Log Troubleshooting**: Aggregate logs from all services to debug issues across your stack
 - **Development Environment Monitoring**: Keep an eye on resource usage while coding and testing
-- **Container Health Checks**: Ensure all your services are running and healthy
+- **Container Health Checks**: Keep an eye on whether your services are running (stopped containers drop out of the list)
 
 ## Supported Technologies
 

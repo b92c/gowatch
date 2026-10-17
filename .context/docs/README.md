@@ -13,8 +13,8 @@ Welcome to the GoWatch repository knowledge base. Start with the project overvie
 - `internal/docker/` — Docker daemon interaction, container monitoring
 - `internal/ui/` — Terminal dashboard using tcell/tview: themes, panel layout, configurable keybindings and the help page
 - `internal/config/` — YAML configuration loading, validation and the example file
-- `internal/trace/` — Distributed tracing (planned)
-- `internal/aws/` — AWS integrations (CloudWatch, XRay, Lambda - planned)
+- `internal/trace/` — Trace store, log correlator and OTLP/HTTP JSON receiver (the exporter is not wired)
+- `internal/aws/` — AWS structure only (collectors return fixed data and are not called; integration planned)
 - `pkg/metrics/` — Public metrics types
 - `docker-compose.yaml` — Docker development environment
 - `makefile` — Build and development commands

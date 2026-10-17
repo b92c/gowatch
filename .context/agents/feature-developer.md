@@ -35,8 +35,8 @@ GoWatch monitors Docker containers and displays real-time metrics (CPU, memory, 
 - **internal/ui/help.go** - The interactive help page (`?`), a `tview.Table` built from the active keymap
 - **internal/ui/components.go** - Reusable UI components
 - **internal/config/** - YAML configuration (`Config`, `Default()`, `Load()`, `Validate()`, `DefaultYAML()`)
-- **internal/trace/** - Distributed tracing (planned)
-- **internal/aws/** - AWS integrations (CloudWatch, XRay, Lambda - planned)
+- **internal/trace/** - Trace store, log correlator (called on every log line by the collector), OTLP/HTTP JSON receiver (started by `main` when enabled) and an `Exporter` that nothing outside the tests calls
+- **internal/aws/** - AWS state manager and CloudWatch, Lambda, X-Ray and CloudFormation collectors: structure only, the collectors return fixed data and nothing calls them, and the AWS SDK is not a dependency
 - **pkg/metrics/** - Public metrics types
 
 ## Development Workflow
