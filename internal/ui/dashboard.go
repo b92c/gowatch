@@ -140,6 +140,16 @@ func NewDashboard() *Dashboard {
 	return dash
 }
 
+// ApplyInitialFilters sets the filters the dashboard starts with, for example
+// the ones from the config file, and shows the search text in the search field.
+// Empty values leave that filter off. Esc still clears all of them.
+func (d *Dashboard) ApplyInitialFilters(search string, status []string, minLogLevel metrics.LogLevel) {
+	d.filterState.SetSearch(search)
+	d.filterState.SetStatusFilter(append([]string(nil), status...))
+	d.filterState.SetMinLogLevel(minLogLevel)
+	d.searchField.SetText(d.filterState.SearchText)
+}
+
 func (d *Dashboard) Update(containers docker.Containers) {
 	filtered := filter.FilterContainers(containers, d.filterState)
 	d.updateServicesTable(filtered)

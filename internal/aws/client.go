@@ -34,18 +34,48 @@ type AWSClientManager struct {
 	mu          sync.RWMutex
 }
 
+// Options carries the AWS settings that come from the config file. The zero
+// value reproduces the environment-only behavior.
+type Options struct {
+	// Enabled forces the integration on or off. Nil means auto: it is enabled
+	// when the environment or the other options configure AWS.
+	Enabled     *bool
+	Region      string
+	EndpointURL string
+}
+
+// NewAWSClientManager builds a manager from the AWS_* environment variables only.
 func NewAWSClientManager() *AWSClientManager {
+	return NewAWSClientManagerWithOptions(Options{})
+}
+
+// NewAWSClientManagerWithOptions builds a manager from the environment and o.
+// AWS_* environment variables take priority over the corresponding options:
+// region is AWS_REGION, then AWS_DEFAULT_REGION, then o.Region, then
+// us-east-1; the endpoint is AWS_ENDPOINT_URL, then o.EndpointURL. An explicit
+// o.Enabled always wins; otherwise the integration is enabled when
+// credentials, a profile, a region or an endpoint are configured.
+func NewAWSClientManagerWithOptions(o Options) *AWSClientManager {
 	region := os.Getenv("AWS_REGION")
 	if region == "" {
 		region = os.Getenv("AWS_DEFAULT_REGION")
+	}
+	if region == "" {
+		region = o.Region
 	}
 	if region == "" {
 		region = "us-east-1"
 	}
 
 	endpointURL := os.Getenv("AWS_ENDPOINT_URL")
+	if endpointURL == "" {
+		endpointURL = o.EndpointURL
+	}
 
-	enabled := os.Getenv("AWS_ACCESS_KEY_ID") != "" || os.Getenv("AWS_PROFILE") != "" || endpointURL != "" || os.Getenv("AWS_REGION") != ""
+	enabled := os.Getenv("AWS_ACCESS_KEY_ID") != "" || os.Getenv("AWS_PROFILE") != "" || endpointURL != "" || os.Getenv("AWS_REGION") != "" || o.Region != ""
+	if o.Enabled != nil {
+		enabled = *o.Enabled
+	}
 
 	return &AWSClientManager{
 		region:      region,

@@ -36,7 +36,7 @@ GoWatch monitors Docker containers via the Moby client and displays metrics in a
 ### User Documentation
 - **README.md** - Installation, quick start, features
 - **Usage examples** - Common use cases
-- **Configuration** - Any config options (currently zero-config)
+- **Configuration** - The optional YAML config file, its flags and precedence (README "Configuration" section; GoWatch still works with no file)
 
 ### Developer Documentation
 - **.context/docs/project-overview.md** - Architecture and components

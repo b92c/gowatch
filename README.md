@@ -62,7 +62,7 @@ GoWatch provides a real-time terminal dashboard with three main sections:
 
 ![GoWatch Dashboard](.assets/gowatch-dash.gif)
 
-The interactive dashboard updates every 2 seconds, providing live visibility into your containerized services.
+The interactive dashboard updates every 2 seconds by default (configurable, see [Configuration](#configuration)), providing live visibility into your containerized services.
 
 ## Installation
 
@@ -146,7 +146,7 @@ gowatch/
 │   ├── docker/           # Docker monitoring and collection
 │   ├── trace/            # Distributed tracing functionality
 │   ├── ui/               # Terminal UI components and dashboard
-│   └── config/           # Configuration management
+│   └── config/           # YAML configuration loading and validation
 ├── pkg/metrics/          # Metrics types and definitions
 ├── docker-compose.yaml   # Docker development environment
 ├── Dockerfile           # Multi-stage build configuration
@@ -155,14 +155,80 @@ gowatch/
 
 ## Configuration
 
-GoWatch is designed to work out-of-the-box with Docker environments. The tool automatically:
+GoWatch works out of the box: with no configuration file it detects your running containers, refreshes every 2 seconds, tails the last 50 log lines per container, keeps 60 history points and runs the built-in alert rules. A configuration file is only needed to change those defaults.
 
-- **Detects all running Docker containers** on the host system
-- **Accesses the Docker daemon socket** for real-time container metrics
-- **Streams logs** from all monitored containers
-- **Calculates resource usage** based on Docker cgroup statistics
+### Config files and precedence
 
-No configuration files or environment variables needed - just run `gowatch` and start monitoring!
+Settings are layered, from lowest to highest priority:
+
+1. Built-in defaults
+2. `~/.gowatch/config.yaml`
+3. `./gowatch.yaml` (in the directory where you start GoWatch)
+4. Environment variables (AWS only, see below)
+
+Each file only overrides the keys it sets; everything else keeps the value from the previous layer. Lists (such as `filters.status`) are replaced as a whole, while maps (such as `alerts.rules`) are merged by key. A file that does not exist is skipped. With `--config <file>`, only the built-in defaults and that file are used, and the file must exist.
+
+Because `./gowatch.yaml` may come from a repository you merely cloned, it is not allowed to set `aws.endpoint_url` or a `tracing.otlp_receiver.address` other than `127.0.0.1`, `[::1]` or `localhost`: GoWatch refuses to start and tells you to move the setting to `~/.gowatch/config.yaml` or to pass the file with `--config`. `~/.gowatch/config.yaml` and a `--config` file may set both.
+
+Unknown keys, malformed YAML (including a second `---` document) and out-of-range values stop GoWatch at startup with a message on stderr (including the file and line for YAML problems), so a typo never goes unnoticed.
+
+### Command-line flags
+
+| Flag | Description |
+| --- | --- |
+| `--config <file>` | Use this file instead of `~/.gowatch/config.yaml` and `./gowatch.yaml`. |
+| `--print-default-config` | Print a commented example configuration to stdout and exit. |
+
+The easiest way to start is:
+
+```bash
+gowatch --print-default-config > gowatch.yaml
+```
+
+The generated file contains every default value, so using it unchanged behaves exactly like having no file at all.
+
+### Options
+
+```yaml
+refresh_interval: 2s       # how often containers are polled (minimum 500ms)
+
+logs:
+  tail_lines: 50           # log lines fetched per container (1-5000)
+
+history:
+  max_points: 60           # samples kept for the CPU/memory sparklines (10-3600)
+
+filters:                   # applied at startup; Esc in the dashboard clears all of them
+  search: ""               # matches service name, container ID or image
+  min_log_level: ""        # info | warn | error (empty shows every level)
+  status: []               # container states to show, for example [running, exited]
+
+alerts:
+  enabled: true            # false turns the alerting engine off
+  rules:                   # override built-in rules by ID; omitted fields keep their value
+    high_cpu:
+      threshold: 85
+      # hysteresis: 75     # optional; must not exceed threshold
+      consecutive_hits: 3
+      severity: warn       # warn | crit
+      enabled: true
+
+tracing:
+  otlp_receiver:
+    enabled: false         # off by default
+    address: "127.0.0.1:4318"
+
+aws:
+  region: ""
+  endpoint_url: ""
+  enabled: auto            # auto | true | false
+```
+
+**Alert rules.** The built-in rules are `high_cpu`, `high_mem`, `oom_killed` and `container_down`. Under `alerts.rules` you can change `threshold`, `hysteresis`, `consecutive_hits` and `severity` of a rule, or drop it with `enabled: false`. `threshold` and `hysteresis` must be finite numbers >= 0, and `hysteresis` must not exceed `threshold`; if you change `threshold` and leave `hysteresis` out, the built-in hysteresis is lowered to match when needed. Write each rule ID once per file (`high_cpu` and `HIGH_CPU` count as the same rule). If the same rule appears in both config files, the two entries are combined field by field.
+
+**OTLP receiver.** When `tracing.otlp_receiver.enabled` is `true`, GoWatch listens on `address` and accepts OTLP/HTTP JSON traces on `/v1/traces`, which then show up in the dashboard. If the address cannot be bound, GoWatch exits with an error before the dashboard opens.
+
+**AWS.** `aws.region` and `aws.endpoint_url` are used when the corresponding environment variables are not set (`AWS_REGION`, then `AWS_DEFAULT_REGION`, then the config file, then `us-east-1`; `AWS_ENDPOINT_URL` before the config file). With `enabled: auto` the AWS integration is on when `AWS_ACCESS_KEY_ID`, `AWS_PROFILE`, `AWS_REGION` or `AWS_ENDPOINT_URL` is set, or when the config file sets `region` or `endpoint_url`. `enabled: true` or `enabled: false` always wins.
 
 ## Use Cases
 

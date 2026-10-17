@@ -23,12 +23,12 @@ GoWatch monitors Docker containers and displays real-time metrics (CPU, memory, 
 
 ## Codebase Structure
 
-- **cmd/gowatch/main.go** - Entry point, creates Docker client and dashboard
+- **cmd/gowatch/main.go** - Entry point: parses flags, loads the config, configures the collector, starts the optional OTLP receiver, creates Docker client and dashboard
 - **internal/docker/collector.go** - Container watching, stats and logs collection
 - **internal/docker/parser.go** - Docker stats and log stream parsing
 - **internal/ui/dashboard.go** - Terminal dashboard with services table, resources, logs
 - **internal/ui/components.go** - Reusable UI components
-- **internal/config/** - Configuration management
+- **internal/config/** - YAML configuration (`Config`, `Default()`, `Load()`, `Validate()`, `DefaultYAML()`)
 - **internal/trace/** - Distributed tracing (planned)
 - **internal/aws/** - AWS integrations (CloudWatch, XRay, Lambda - planned)
 - **pkg/metrics/** - Public metrics types
@@ -41,6 +41,19 @@ GoWatch monitors Docker containers and displays real-time metrics (CPU, memory, 
 4. Write tests (`*_test.go` files)
 5. Run `make test` and `make go-sec`
 6. Update documentation if needed
+
+## Configuration and Startup Flow
+
+`main` runs in this order: flags -> `config.Load()` (exits with a message on stderr if the config is invalid) -> Docker client -> `docker.Configure()` (log tail, history size, alert rules, AWS options) -> OTLP receiver if enabled -> `ui.NewDashboard()` + `ApplyInitialFilters()` -> ticker with `refresh_interval`.
+
+When adding a user-tunable option:
+
+1. Add the field (with a `yaml` tag) to the structs in `internal/config/config.go`, its built-in value to `Default()`, its checks to `Validate()` and its documented line to `DefaultYAML()`.
+2. Pass it to the consuming package through an `Options` struct (see `docker.Options`, `aws.Options`); a zero value must mean "keep the built-in default".
+3. Keep `internal/config` a leaf package: only the standard library, the YAML decoder, `internal/alert` and `pkg/metrics`. Never import `internal/docker`, `internal/ui` or `internal/filter` from it.
+4. Add table-driven tests, update the README "Configuration" section and keep the no-config-file behavior byte-for-byte identical to the defaults.
+5. `./gowatch.yaml` may come from an untrusted checkout. A setting that could redirect network traffic or expose a listener must not be honored from that layer: extend `Config.untrustedSettings` in `internal/config/config.go`.
+6. Beware of `make field-fix`: it reorders struct fields, so use keyed fields in struct literals (including test tables).
 
 ## Go Patterns Used
 
@@ -62,7 +75,7 @@ GoWatch monitors Docker containers and displays real-time metrics (CPU, memory, 
 
 - `internal/docker/collector.go` - Add new container metrics
 - `internal/ui/dashboard.go` - Add new UI panels or views
-- `internal/config/config.go` - Add configuration options
+- `internal/config/config.go` - Add configuration options (see "Configuration and Startup Flow")
 - `pkg/metrics/types.go` - Add new metric types
 
 ## Commands
