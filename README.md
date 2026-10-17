@@ -24,7 +24,7 @@ GoWatch includes a fully configured Docker development environment:
 
 The project includes a complete Docker setup for development:
 
-- **Dockerfile**: Multi-stage build using Go tip-alpine and Alpine runtime
+- **Dockerfile**: Multi-stage build using the stable Go 1.26 Alpine image and an Alpine runtime
 - **Docker Compose**: Pre-configured service with volume mounts and Docker socket access
 - **Development Tools**: Includes security scanning and field alignment tools
 
