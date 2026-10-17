@@ -48,11 +48,11 @@ GoWatch monitors Docker containers and displays real-time metrics (CPU, memory, 
 
 When adding a user-tunable option:
 
-1. Add the field (with a `yaml` tag) to the structs in `internal/config/config.go`, its built-in value to `Default()`, its checks to `Validate()` and its documented line to `DefaultYAML()`.
+1. Add the field (with a `yaml` tag) to the structs in `internal/config/config.go`, its built-in value to `Default()`, its checks to `Validate()` (`validate.go`) and its documented line to `DefaultYAML()` (`defaultyaml.go`).
 2. Pass it to the consuming package through an `Options` struct (see `docker.Options`, `aws.Options`); a zero value must mean "keep the built-in default".
 3. Keep `internal/config` a leaf package: only the standard library, the YAML decoder, `internal/alert` and `pkg/metrics`. Never import `internal/docker`, `internal/ui` or `internal/filter` from it.
 4. Add table-driven tests, update the README "Configuration" section and keep the no-config-file behavior byte-for-byte identical to the defaults.
-5. `./gowatch.yaml` may come from an untrusted checkout. A setting that could redirect network traffic or expose a listener must not be honored from that layer: extend `Config.untrustedSettings` in `internal/config/config.go`.
+5. `./gowatch.yaml` may come from an untrusted checkout. A setting that could redirect network traffic, or expose or start a listener, must not be honored from that layer: extend `Config.untrustedSettings` in `internal/config/untrusted.go`.
 6. Beware of `make field-fix`: it reorders struct fields, so use keyed fields in struct literals (including test tables).
 
 ## Go Patterns Used
@@ -75,7 +75,7 @@ When adding a user-tunable option:
 
 - `internal/docker/collector.go` - Add new container metrics
 - `internal/ui/dashboard.go` - Add new UI panels or views
-- `internal/config/config.go` - Add configuration options (see "Configuration and Startup Flow")
+- `internal/config/` - Add configuration options (see "Configuration and Startup Flow"): types and `Default()` in `config.go`, layering in `load.go`, checks in `validate.go`, untrusted-layer rules in `untrusted.go`, alert rules in `alerts.go`, `DefaultYAML()` in `defaultyaml.go`
 - `pkg/metrics/types.go` - Add new metric types
 
 ## Commands

@@ -176,7 +176,7 @@ func TestRunReadsDefaultLocations(t *testing.T) {
 }
 
 // ./gowatch.yaml may come from an untrusted checkout, so startup must refuse
-// the settings that could redirect AWS calls or expose the trace receiver.
+// the settings that could redirect AWS calls or start the trace receiver.
 func TestRunRefusesRiskySettingsFromWorkingDirectory(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -185,6 +185,7 @@ func TestRunRefusesRiskySettingsFromWorkingDirectory(t *testing.T) {
 	}{
 		{"aws endpoint", "aws:\n  endpoint_url: http://evil.example.com\n", "aws.endpoint_url"},
 		{"public OTLP address", "tracing:\n  otlp_receiver:\n    enabled: true\n    address: \"0.0.0.0:4318\"\n", "tracing.otlp_receiver.address"},
+		{"enabling the OTLP receiver", "tracing:\n  otlp_receiver:\n    enabled: true\n", "tracing.otlp_receiver.enabled"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
