@@ -1,6 +1,6 @@
 {
-  "version": "1.0.0",
-  "generated": "2026-03-22T00:00:00.000Z",
+  "version": "1.1.0",
+  "generated": "2026-10-17T00:00:00.000Z",
   "stack": {
     "primaryLanguage": "go",
     "languages": ["go"],
@@ -13,43 +13,55 @@
     "hasCI": true
   },
   "structure": {
-    "totalFiles": 13,
+    "totalFiles": 29,
     "topDirectories": [
       {
         "name": "cmd/gowatch",
-        "description": "Application entry point",
+        "description": "Application entry point: flags, config loading, theme and keymap resolution, collector setup, optional OTLP receiver and the dashboard",
         "fileCount": 1,
         "files": ["main.go"]
       },
       {
         "name": "internal/docker",
-        "description": "Docker daemon interaction and container monitoring",
+        "description": "Docker daemon interaction: container watching, stats and logs collection, collector options and the global alert engine, trace store and AWS manager",
         "fileCount": 2,
         "files": ["collector.go", "parser.go"]
       },
       {
         "name": "internal/ui",
-        "description": "Terminal UI dashboard using tcell/tview: dashboard, themes, panel layout and themed texts",
-        "fileCount": 5,
-        "files": ["dashboard.go", "components.go", "theme.go", "layout.go", "texts.go"]
+        "description": "Terminal UI using tcell/tview: dashboard, themes, panel layout, themed texts, configurable keybindings (keymap, input handling) and the interactive help page",
+        "fileCount": 8,
+        "files": ["dashboard.go", "components.go", "theme.go", "layout.go", "texts.go", "keymap.go", "input.go", "help.go"]
       },
       {
         "name": "internal/config",
-        "description": "YAML configuration: types and defaults, layered loading, validation, untrusted-layer rules, alert rule overrides and the example file",
+        "description": "YAML configuration: types and defaults, layered loading, validation, untrusted-layer rules, alert rule overrides and the example file. A leaf package (no docker, ui or filter imports)",
         "fileCount": 6,
         "files": ["config.go", "load.go", "validate.go", "untrusted.go", "alerts.go", "defaultyaml.go"]
       },
       {
-        "name": "internal/trace",
-        "description": "Distributed tracing functionality (planned)",
+        "name": "internal/alert",
+        "description": "Alerting engine: rules, hysteresis, consecutive-hit counters and alert lifecycle",
         "fileCount": 2,
-        "files": ["correlator.go", "exporter.go"]
+        "files": ["engine.go", "types.go"]
+      },
+      {
+        "name": "internal/filter",
+        "description": "Container search and filter state (name, ID, image, status, labels, minimum log level)",
+        "fileCount": 1,
+        "files": ["filter.go"]
+      },
+      {
+        "name": "internal/trace",
+        "description": "Distributed tracing: trace store, log correlator, OTLP/HTTP receiver and exporter",
+        "fileCount": 3,
+        "files": ["correlator.go", "exporter.go", "types.go"]
       },
       {
         "name": "internal/aws",
-        "description": "AWS integrations (planned)",
-        "fileCount": 4,
-        "files": ["cloudwatch.go", "xray.go", "lambda.go", "cloudformation.go"]
+        "description": "AWS integrations: client manager and the CloudWatch, Lambda, X-Ray and CloudFormation collector types",
+        "fileCount": 5,
+        "files": ["client.go", "cloudwatch.go", "lambda.go", "xray.go", "cloudformation.go"]
       },
       {
         "name": "pkg/metrics",
@@ -63,23 +75,23 @@
     {
       "name": "Docker Collector",
       "path": "internal/docker/collector.go",
-      "description": "Watches Docker containers, collects stats and logs via Moby client",
-      "exports": ["WatchContainers", "Containers", "Container", "ContainerStats", "ContainerLog", "HostInfo", "FormattedLog"],
-      "dependencies": ["github.com/moby/moby/client", "github.com/moby/moby/api/types/container"]
+      "description": "Watches Docker containers, collects stats and logs via Moby client; Configure() sets the log tail, history size, alert rules and AWS options",
+      "exports": ["WatchContainers", "Configure", "Options", "Containers", "Container", "ContainerLog", "FormattedLog", "GetGlobalAlertEngine", "GetGlobalTraceStore", "GetGlobalAWSManager"],
+      "dependencies": ["github.com/moby/moby/client", "github.com/moby/moby/api/types/container", "internal/alert", "internal/aws", "internal/trace"]
     },
     {
       "name": "Docker Parser",
       "path": "internal/docker/parser.go",
       "description": "Parses Docker stats and multiplexed log streams",
-      "exports": ["ParseStats", "ParseLogs"],
+      "exports": ["ParseStats", "ParseLogs", "ParseLogLevel"],
       "dependencies": ["github.com/moby/moby/api/types/container"]
     },
     {
       "name": "Dashboard",
       "path": "internal/ui/dashboard.go",
-      "description": "Interactive terminal dashboard with services table, resources panel, and logs view",
+      "description": "Interactive terminal dashboard with services table, resources panel, logs view, alerts modal and the help page",
       "exports": ["Dashboard", "NewDashboard", "NewDashboardWithOptions", "Options"],
-      "dependencies": ["github.com/rivo/tview", "github.com/gdamore/tcell/v2", "internal/docker", "internal/config"]
+      "dependencies": ["github.com/rivo/tview", "github.com/gdamore/tcell/v2", "internal/alert", "internal/config", "internal/docker", "internal/filter", "internal/trace", "pkg/metrics"]
     },
     {
       "name": "Theme",
@@ -89,11 +101,81 @@
       "dependencies": ["github.com/rivo/tview", "github.com/gdamore/tcell/v2", "internal/config"]
     },
     {
+      "name": "Layout",
+      "path": "internal/ui/layout.go",
+      "description": "Builds the main grid from the layout config: panel order, hidden panels, relative heights and the focus fallback",
+      "exports": [],
+      "dependencies": ["github.com/rivo/tview", "internal/config"]
+    },
+    {
+      "name": "Keymap",
+      "path": "internal/ui/keymap.go",
+      "description": "Keyboard actions with their groups and descriptions, key parsing, the default and vim presets, BuildKeymap with the keybindings overrides and Keymap.Lookup",
+      "exports": ["Action", "Actions", "ActionNames", "KeyCombo", "ParseKey", "Keymap", "DefaultKeymap", "BuildKeymap", "PresetNames"],
+      "dependencies": ["github.com/gdamore/tcell/v2", "internal/config"]
+    },
+    {
+      "name": "Input",
+      "path": "internal/ui/input.go",
+      "description": "Application-wide key handling: handleInput (the search field guard, the help page, the keymap lookup) and runAction",
+      "exports": [],
+      "dependencies": ["github.com/rivo/tview", "github.com/gdamore/tcell/v2", "internal/docker"]
+    },
+    {
+      "name": "Help page",
+      "path": "internal/ui/help.go",
+      "description": "The interactive help page opened with ?: a table of the active keymap grouped by section, drawn on top of the other pages",
+      "exports": [],
+      "dependencies": ["github.com/rivo/tview", "github.com/gdamore/tcell/v2"]
+    },
+    {
+      "name": "Texts",
+      "path": "internal/ui/texts.go",
+      "description": "Themed texts built from the keymap: the help bar, the alerts modal title, the Docker-offline bar and page",
+      "exports": [],
+      "dependencies": ["github.com/rivo/tview"]
+    },
+    {
+      "name": "Configuration",
+      "path": "internal/config/config.go",
+      "description": "Config types and built-in defaults; Load layers ~/.gowatch/config.yaml and ./gowatch.yaml (or one --config file), Validate checks the values and DefaultYAML prints the commented example",
+      "exports": ["Config", "Default", "Load", "LoadOptions", "KeybindingsConfig", "ThemeConfig", "LayoutConfig", "DefaultYAML"],
+      "dependencies": ["go.yaml.in/yaml/v3", "internal/alert", "pkg/metrics"]
+    },
+    {
+      "name": "Alert Engine",
+      "path": "internal/alert/engine.go",
+      "description": "Evaluates the alert rules for every container on each refresh",
+      "exports": ["AlertEngine", "NewAlertEngine", "ContainerEvaluatorData", "DefaultRules", "AlertRule", "Alert"],
+      "dependencies": ["pkg/metrics"]
+    },
+    {
+      "name": "Filter",
+      "path": "internal/filter/filter.go",
+      "description": "Filter state and the function that applies it to the containers",
+      "exports": ["FilterState", "NewFilterState", "FilterContainers"],
+      "dependencies": ["internal/docker", "pkg/metrics"]
+    },
+    {
+      "name": "OTLP Receiver",
+      "path": "internal/trace/exporter.go",
+      "description": "OTLP/HTTP JSON trace receiver and the trace exporter",
+      "exports": ["OTLPReceiver", "NewOTLPReceiver", "Exporter", "NewExporter"],
+      "dependencies": ["internal/trace"]
+    },
+    {
+      "name": "AWS Client Manager",
+      "path": "internal/aws/client.go",
+      "description": "AWS connection state and options (AWS_* environment variables take priority over the config file); the CloudWatch, Lambda, X-Ray and CloudFormation collectors live in the same package",
+      "exports": ["AWSClientManager", "NewAWSClientManager", "NewAWSClientManagerWithOptions", "Options", "AWSResource", "AWSState"],
+      "dependencies": []
+    },
+    {
       "name": "Main",
       "path": "cmd/gowatch/main.go",
-      "description": "Application entry point - parses flags, loads the config, resolves the theme, creates the Docker client and runs the dashboard",
+      "description": "Application entry point - parses flags, loads the config, resolves the theme and the keymap, configures the collector, starts the optional OTLP receiver, creates the Docker client and runs the dashboard",
       "exports": [],
-      "dependencies": ["internal/config", "internal/docker", "internal/ui", "github.com/moby/moby/client"]
+      "dependencies": ["internal/aws", "internal/config", "internal/docker", "internal/trace", "internal/ui", "github.com/moby/moby/client"]
     }
   ],
   "dependencies": {
@@ -101,7 +183,8 @@
       "github.com/gdamore/tcell/v2": "v2.13.6",
       "github.com/moby/moby/api": "v1.52.0",
       "github.com/moby/moby/client": "v0.2.1",
-      "github.com/rivo/tview": "v0.42.0"
+      "github.com/rivo/tview": "v0.42.0",
+      "go.yaml.in/yaml/v3": "v3.0.4"
     },
     "indirect": {
       "go.opentelemetry.io/otel": "v1.35.0",
@@ -114,29 +197,45 @@
     {
       "name": "gowatch",
       "path": "cmd/gowatch/main.go",
-      "description": "Main CLI entry point"
+      "description": "Main CLI entry point (flags: --config, --theme, --print-default-config)"
     }
   ],
   "dataFlow": [
     {
       "step": 1,
-      "description": "main.go creates Docker client via client.New(client.FromEnv)"
+      "description": "main.go parses the flags and calls config.Load(); a config error is printed to stderr and the process exits before the TUI opens"
     },
     {
       "step": 2,
-      "description": "Goroutine ticker (2s interval) calls docker.WatchContainers()"
+      "description": "main.go resolves the theme with ui.ResolveTheme() (the --theme flag replaces theme.name) and builds the keymap with ui.BuildKeymap(); an invalid theme, color, preset, action or key is a startup error"
     },
     {
       "step": 3,
-      "description": "Collector lists containers, fetches stats and logs for each"
+      "description": "main.go creates the Docker client via client.New(client.FromEnv) and calls docker.Configure() with the log tail, history size, alert rules and AWS options"
     },
     {
       "step": 4,
-      "description": "Parsed data sent to Dashboard.Update()"
+      "description": "If tracing.otlp_receiver.enabled is set, main.go starts the OTLP receiver on docker.GetGlobalTraceStore(); a bind failure is fatal"
     },
     {
       "step": 5,
-      "description": "Dashboard renders services table, resources panel, and logs"
+      "description": "main.go creates the dashboard with ui.NewDashboardWithOptions() (theme, keymap, layout) and applies the initial filters"
+    },
+    {
+      "step": 6,
+      "description": "A goroutine ticker (refresh_interval, 2s by default) calls docker.WatchContainers()"
+    },
+    {
+      "step": 7,
+      "description": "The collector lists containers, fetches stats and logs for each, correlates traces from the log lines, evaluates the alert rules and reads the AWS state"
+    },
+    {
+      "step": 8,
+      "description": "The parsed data goes to Dashboard.Update(), which applies the filters and renders the services table, resources panel, logs view and alerts list (hidden panels are skipped)"
+    },
+    {
+      "step": 9,
+      "description": "Keys go through Dashboard.handleInput: the search field gets every key while it has focus, otherwise the keymap gives an action that runAction performs (the help page is the exception: while it is open only closing and scrolling work)"
     }
   ]
 }

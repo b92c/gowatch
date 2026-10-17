@@ -11,8 +11,8 @@ Welcome to the GoWatch repository knowledge base. Start with the project overvie
 ## Repository Snapshot
 - `cmd/gowatch/` — Application entry point (main.go)
 - `internal/docker/` — Docker daemon interaction, container monitoring
-- `internal/ui/` — Terminal dashboard using tcell/tview
-- `internal/config/` — Configuration management
+- `internal/ui/` — Terminal dashboard using tcell/tview: themes, panel layout, configurable keybindings and the help page
+- `internal/config/` — YAML configuration loading, validation and the example file
 - `internal/trace/` — Distributed tracing (planned)
 - `internal/aws/` — AWS integrations (CloudWatch, XRay, Lambda - planned)
 - `pkg/metrics/` — Public metrics types

@@ -11,6 +11,7 @@ GoWatch is a lightweight, real-time monitoring tool **written in Go** for Docker
 - **Terminal UI Dashboard**: Beautiful, interactive terminal interface built with tcell and tview
 - **Zero Configuration**: Auto-detects running containers and requires no setup
 - **Themes and Layout**: Optional YAML config with four built-in color themes (dark, light, solarized, nord), per-color overrides and a configurable panel layout
+- **Keyboard Shortcuts**: Remappable keys, a `vim` preset and an interactive help page (press `?`)
 - **Development Focused**: Perfect for docker-compose environments and local microservice development
 - **Lightweight**: Minimal resource footprint, built in pure Go
 - **Future AWS Integration**: Planned support for AWS services like CloudWatch, XRay, Lambda, and CloudFormation
@@ -64,6 +65,8 @@ GoWatch provides a real-time terminal dashboard with three main sections:
 ![GoWatch Dashboard](.assets/gowatch-dash.gif)
 
 The interactive dashboard updates every 2 seconds by default (configurable, see [Configuration](#configuration)), providing live visibility into your containerized services.
+
+Press `?` in the dashboard to see every keyboard shortcut (`?`, `Esc` or `q` closes the page). The keys can be changed, see [Keybindings](#keybindings).
 
 ## Installation
 
@@ -241,6 +244,12 @@ layout:                    # panels from top to bottom, see "Layout" below
     height: 1
   help_bar:
     visible: true
+
+keybindings:               # keyboard shortcuts, see "Keybindings" below
+  preset: default          # default | vim
+  # bindings:              # replaces ALL the keys of an action
+  #   quit: ["q", "x"]
+  #   scroll_down: ["down", "j"]
 ```
 
 **Alert rules.** The built-in rules are `high_cpu`, `high_mem`, `oom_killed` and `container_down`. Under `alerts.rules` you can change `threshold`, `hysteresis`, `consecutive_hits` and `severity` of a rule, or drop it with `enabled: false`. `threshold` and `hysteresis` must be finite numbers >= 0, and `hysteresis` must not exceed `threshold`; if you change `threshold` and leave `hysteresis` out, the built-in hysteresis is lowered to match when needed. Write each rule ID once per file (`high_cpu` and `HIGH_CPU` count as the same rule). If the same rule appears in both config files, the two entries are combined field by field.
@@ -275,6 +284,50 @@ The colors that tell services apart in the logs come from the theme and cannot b
 **Known limitations.** The log level badges (`[INFO]`, `[WARN]`, `[ERROR]`, `[FATAL]`...) are not drawn: the terminal UI library reads text between square brackets as a color tag, so the badge text never appears in the log lines. That is how GoWatch has always drawn them, and showing them would change the default look, so it has not been changed. As a result, `log_error`, `log_warn`, `log_info`, `log_debug` and `log_fatal_text` have no visible effect yet, and `log_fatal` only colors the background of the rest of a FATAL log line. The roles are kept so that a config file that sets them keeps working if the badges become visible. A related case: the root operation of the recent traces (shown only when the OTLP receiver is on) is drawn in the terminal's default text color in every theme, so it can be hard to read with the `light` theme in a dark terminal, or with `solarized` or `nord` in a light one.
 
 **Layout.** `layout` describes the panels from top to bottom: the services table, system resources, the search field, the logs and the help bar. `height` is the share of the free space a panel gets compared to the others, from 1 to 100: with every height at 1 the panels are equal, and `height: 2` gives a panel twice the space. `0` or no value counts as 1. The search field (3 rows) and the help bar (1 row) have a fixed height. `visible: false` removes the system resources, the logs or the help bar from the screen; the services table and the search field are always shown. With the logs hidden, the focus starts on the services table and goes back to it after `Esc`, `Enter` or closing the alerts modal. The layout is read at startup; panels cannot be toggled while GoWatch runs.
+
+### Keybindings
+
+The keys are the ones GoWatch has always had, plus `?` for the help page. `keybindings.preset` picks the starting keys and `keybindings.bindings` changes single actions:
+
+```yaml
+keybindings:
+  preset: vim              # default | vim
+  bindings:
+    quit: ["q", "x"]       # replaces ALL the keys of the action
+    search: ["/"]          # with no "f", the help bar no longer offers a filter key
+```
+
+| Action | What it does | `default` keys | `vim` keys |
+| --- | --- | --- | --- |
+| `help` | Show or hide the help page | `?` | `?` |
+| `quit` | Quit GoWatch | `q` | `q` |
+| `docker_view` | Show the Docker services | `d`, `D` | `d`, `D` |
+| `aws_view` | Show the AWS resources | `a`, `A` | `a`, `A` |
+| `search` | Focus the search field | `/`, `f` | `/`, `f` |
+| `cycle_log_level` | Cycle the minimum log level | `l`, `L` | `l`, `L` |
+| `clear_filter` | Clear all filters, including the ones from the config file (closes the alerts list first when it is open) | `Esc` | `Esc` |
+| `toggle_alerts` | Show or hide the alerts list | `w`, `W` | `w`, `W` |
+| `clear_resolved_alerts` | Clear the resolved alerts (works on every screen) | `c`, `C` | `c`, `C` |
+| `scroll_up` | Scroll up a line | `↑` | `↑`, `k` |
+| `scroll_down` | Scroll down a line | `↓` | `↓`, `j` |
+| `page_up` | Scroll up a page | `PgUp` | `PgUp`, `Ctrl+U` |
+| `page_down` | Scroll down a page | `PgDn` | `PgDn`, `Ctrl+D` |
+| `scroll_top` | Jump to the top | `Home` | `Home`, `g` |
+| `scroll_bottom` | Jump to the bottom | `End` | `End`, `G` |
+
+The `vim` preset is the `default` preset plus `j`, `k`, `g`, `G`, `Ctrl+D` and `Ctrl+U`. `Ctrl+D` and `Ctrl+U` move a whole page, the height of the logs panel, not half a page as in vim. There is no `emacs` preset.
+
+**Keys.** A key is a single character (`q`, `/`, `?`, `G`; upper and lower case are different keys, so `l` and `L` are listed separately), `ctrl+<letter>` (`ctrl+d`), `space`, or one of `esc` (or `escape`), `enter`, `tab`, `up`, `down`, `pgup`, `pgdn`, `home` and `end`. The names are case-insensitive. Quote the keys in YAML, because characters such as `?`, `#`, `,` and `[` mean something to it: `["?", "#"]`. Action names are written in lower case with underscores (`Quit` also works).
+
+**Rules.** An override replaces all the keys of its action, so listing `quit: ["x"]` makes `q` stop quitting; actions you leave out keep the keys of the preset. Each action needs at least one key, a key can run only one action and a key cannot be repeated within an action. To swap the keys of two actions, override both of them. Any problem (an unknown preset, action or key, a clash, `ctrl+c`...) stops GoWatch at startup with a message that lists the valid choices. The rules are checked together, so the message shows every problem at once.
+
+**Keys that cannot be rebound.** `Ctrl+C` always quits GoWatch, wherever you are, and cannot be bound to an action. `ctrl+h`, `ctrl+i` and `ctrl+m` are not accepted either: a terminal sends the same bytes as for Backspace, Tab and Enter, so GoWatch could not tell them apart (use `tab` and `enter`). The arrow keys, `PgUp`, `PgDn`, `Home` and `End` (and `Ctrl+F` and `Ctrl+B`) are handled by the panel with focus, which scrolls with them in every keymap. They are listed in the scroll actions for the help page and the help bar, and can only be bound to the scroll action that matches what they do (`up` to `scroll_up`, and so on). The native keys scroll whichever panel has the focus (the logs, unless the alerts list or the help page is open). The other keys of the scroll actions, such as `j` and `k` in the `vim` preset, scroll the logs, or the alerts list when it is open, or the help page when that is open. Scrolling the logs with the arrow keys, `PgUp`, `PgDn`, `Home` or `End` (`End` included) stops them from following new lines; only a `scroll_bottom` key that is not one of those (`G` in the `vim` preset) makes them follow the newest line again.
+
+**Search field.** While the search field has the focus, every key is typed into it, `?` and the bound letters included.
+
+**Help page.** `?` (the `help` action) opens a page that lists every action by section with the keys in use, so remapped keys show up as you set them, followed by the keys that always work. It opens over the alerts list too, and goes back to it when it closes. The page closes with the keys of the `help` and `quit` actions and with `Esc`, and quitting does not happen while it is open. No other action runs while it is open (the view cannot change behind it, and the search does not open).
+
+**Help bar.** The bar at the bottom and the title of the alerts list show the first key of each action, so they follow your bindings. With the default keys the bar is the original one with one more entry, `? Help`, between `↑↓ Scroll` and `q Quit`.
 
 ## Use Cases
 

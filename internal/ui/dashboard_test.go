@@ -222,6 +222,12 @@ func TestNewDashboardDefaults(t *testing.T) {
 	if dash.app.GetFocus() != dash.logsView {
 		t.Errorf("initial focus = %T, want the logs view", dash.app.GetFocus())
 	}
+	if !reflect.DeepEqual(dash.keymap, DefaultKeymap()) {
+		t.Errorf("default keymap = %+v, want the default preset", dash.keymap)
+	}
+	if dash.showingHelp {
+		t.Error("the help page is open at startup")
+	}
 }
 
 func TestNewDashboardWithOptionsAppliesTheTheme(t *testing.T) {

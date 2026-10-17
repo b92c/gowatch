@@ -52,24 +52,29 @@ GoWatch is transitioning from MVP (core Docker monitoring + TUI dashboard) to a 
 
 ---
 
-## Phase 2: Configuration & Customization (Q3 2026)
+## Phase 2: Configuration & Customization (Q3 2026) ✅
+
+Phase 2 is complete, except for the Emacs keybinding mode (see P2.3).
 
 **P2.1 - Configuration File Support** ✅
 - YAML config format (`go.yaml.in/yaml/v3`, strict: unknown keys are errors)
 - Paths: ~/.gowatch/config.yaml, ./gowatch.yaml (later files override earlier ones key by key); `--config <file>` replaces both
 - Settings: refresh interval, log tail, history size, initial filters, alert rule overrides, OTLP receiver, AWS
 - `--print-default-config` prints a commented example
-- Theme and layout settings landed with P2.2; shortcut settings land with P2.3
+- Theme and layout settings landed with P2.2; keybinding settings with P2.3
 
 **P2.2 - Theme & UI Customization** ✅
 - Built-in themes (dark, light, solarized, nord); `dark` is the original look, and it stays the default
 - `--theme <name>` flag and `theme.name`; per-role color overrides under `theme.colors` (color name or `#rrggbb`)
 - Basic layout customization: show or hide the resources panel, the logs and the help bar, and set relative panel heights under `layout`
 
-**P2.3 - Keyboard Shortcuts & Help System**
-- Vim/Emacs/default modes
-- Configurable keybindings
-- Interactive help menu
+**P2.3 - Keyboard Shortcuts & Help System** ✅ (except the Emacs mode)
+- Configurable keybindings: `keybindings.preset` and `keybindings.bindings` in the config file, checked at startup by `ui.BuildKeymap` (unknown preset, action or key, a key on two actions and `ctrl+c`, which always quits, are errors)
+- `default` preset (the keys GoWatch has always had, plus `?` for the help page) and `vim` preset (`j`/`k`, `g`/`G`, `Ctrl+D`/`Ctrl+U` on top of `default`)
+- Interactive help page on `?`, generated from the active keymap; the help bar and the alerts list title show the keys in use
+- Not done: the Emacs mode, which was left out on purpose. `preset: emacs` is a startup error that lists `default` and `vim`
+
+**Numbering of the older commits.** Some commit messages use labels that differ from the phase numbers of this document: `feat: implement distributed tracing ... (P2.0)` is Phase 3 here, `feat: implement aws serverless ... (P3.0)` is Phase 4, and `feat: implement alerting engine ...`, which has no label, is P5.1. The commits tagged P2.1, P2.2 and P2.3 are the Phase 2 items of this document.
 
 ---
 
@@ -193,5 +198,5 @@ GoWatch is transitioning from MVP (core Docker monitoring + TUI dashboard) to a 
 
 ---
 
-**Last Updated**: April 2026
-**Next Review**: July 2026
+**Last Updated**: October 2026
+**Next Review**: January 2027

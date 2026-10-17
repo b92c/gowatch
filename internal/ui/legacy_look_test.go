@@ -33,6 +33,11 @@ const (
 	legacyAlertsTitle  = " 🚨 Active & Recent Alerts ([yellow]Esc[white]/[yellow]w[white] Close | [yellow]c[white] Clear Resolved) "
 )
 
+// legacyHelpBarWithHint is the original help bar plus the one entry added since
+// then: "? Help", between "Scroll" and "Quit". It is the only change to the
+// default look that the keyboard help page brought.
+var legacyHelpBarWithHint = strings.Replace(legacyHelpBar, "[yellow]q[white] Quit", "[yellow]?[white] Help | [yellow]q[white] Quit", 1)
+
 // legacyDaemonErrorFormat is the format of the "Docker daemon offline" page; its
 // only argument is the error text.
 const legacyDaemonErrorFormat = "\n\n\n" +
@@ -318,18 +323,22 @@ func TestDarkThemeResourcesViewMatchesTheOriginal(t *testing.T) {
 func TestDarkThemeTextsMatchTheOriginal(t *testing.T) {
 	d := newTestDashboard(t, Options{})
 	theme := darkTheme()
+	keymap := DefaultKeymap()
 
-	if got := d.helpBar.GetText(false); got != legacyHelpBar {
-		t.Errorf("help bar:\n%q\nwant the original:\n%q", got, legacyHelpBar)
+	if got := d.helpBar.GetText(false); got != legacyHelpBarWithHint {
+		t.Errorf("help bar:\n%q\nwant the original plus the Help hint:\n%q", got, legacyHelpBarWithHint)
 	}
-	if got := helpBarText(theme); got != legacyHelpBar {
-		t.Errorf("helpBarText():\n%q\nwant the original:\n%q", got, legacyHelpBar)
+	if got := helpBarText(theme, keymap); got != legacyHelpBarWithHint {
+		t.Errorf("helpBarText():\n%q\nwant the original plus the Help hint:\n%q", got, legacyHelpBarWithHint)
 	}
-	if got := errorHelpBarText(theme); got != legacyErrorHelpBar {
+	if got := errorHelpBarText(theme, keymap); got != legacyErrorHelpBar {
 		t.Errorf("errorHelpBarText():\n%q\nwant the original:\n%q", got, legacyErrorHelpBar)
 	}
 	if got := d.alertsModal.GetTitle(); got != legacyAlertsTitle {
 		t.Errorf("alerts modal title:\n%q\nwant the original:\n%q", got, legacyAlertsTitle)
+	}
+	if got := alertsModalTitle(theme, keymap); got != legacyAlertsTitle {
+		t.Errorf("alertsModalTitle():\n%q\nwant the original:\n%q", got, legacyAlertsTitle)
 	}
 	for _, msg := range []string{"Cannot connect to the Docker daemon", "100% broken [x]"} {
 		err := fmt.Errorf("%s", msg)
