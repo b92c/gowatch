@@ -118,6 +118,48 @@ layout:
     height: 1
   help_bar:
     visible: true
+
+# Keyboard shortcuts. preset picks the starting keys: default (the keys GoWatch
+# has always had, plus ? for the help page) or vim (default plus j/k to scroll,
+# g/G for the top and the bottom, ctrl+d/ctrl+u to page). bindings replaces ALL
+# the keys of an action; an action you leave out keeps the keys of the preset.
+# Press ? in the dashboard to see the keys in use.
+#
+# A key is a single character (q, /, ?, G; upper and lower case are different
+# keys), ctrl+<letter>, or one of: esc, enter, tab, up, down, pgup, pgdn, home,
+# end, space. Quote the keys in YAML: "?", "/", "#"...
+#   - ctrl+c always quits GoWatch and cannot be bound. ctrl+h, ctrl+i and ctrl+m
+#     are the Backspace, Tab and Enter keys in a terminal and are not accepted.
+#   - up, down, pgup, pgdn, home, end (and ctrl+f, ctrl+b) always scroll the
+#     panel with focus, so they can only be bound to the scroll action that
+#     matches what they do.
+#   - Scrolling with up, down, pgup, pgdn, home or end stops the logs from
+#     following new lines, end included. A scroll_bottom key that is not one of
+#     them (G in the vim preset) makes the logs follow the newest line again.
+#   - A key can run only one action. To swap the keys of two actions, set both.
+#
+# Actions, with their keys in the default preset:
+#   help                   ?         show or hide the help page
+#   quit                   q         quit GoWatch
+#   docker_view            d, D      show the Docker services
+#   aws_view               a, A      show the AWS resources
+#   search                 /, f      focus the search field
+#   cycle_log_level        l, L      cycle the minimum log level
+#   clear_filter           esc       clear all filters (closes the alerts list first)
+#   toggle_alerts          w, W      show or hide the alerts list
+#   clear_resolved_alerts  c, C      clear the resolved alerts
+#   scroll_up              up        scroll up a line
+#   scroll_down            down      scroll down a line
+#   page_up                pgup      scroll up a page
+#   page_down              pgdn      scroll down a page
+#   scroll_top             home      jump to the top
+#   scroll_bottom          end       jump to the bottom
+keybindings:
+  preset: default
+  # bindings:
+  #   quit: ["q", "x"]
+  #   scroll_down: ["down", "j"]
+  #   scroll_up: ["up", "k"]
 `)
 
 	return []byte(b.String())

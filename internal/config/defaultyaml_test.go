@@ -22,7 +22,7 @@ func TestDefaultYAML(t *testing.T) {
 		for k := range doc {
 			got = append(got, k)
 		}
-		want := []string{"refresh_interval", "logs", "history", "filters", "alerts", "tracing", "aws", "theme", "layout"}
+		want := []string{"refresh_interval", "logs", "history", "filters", "alerts", "tracing", "aws", "theme", "layout", "keybindings"}
 		if len(got) != len(want) {
 			t.Fatalf("sections = %v, want %v", got, want)
 		}
@@ -67,10 +67,17 @@ func TestDefaultYAML(t *testing.T) {
 			t.Errorf("layout from DefaultYAML = %+v, want %+v", cfg.Layout, wantLayout)
 		}
 
+		// The keybindings section names the default preset and leaves the example
+		// bindings commented out.
+		if cfg.Keybindings.Preset != "default" || len(cfg.Keybindings.Bindings) != 0 {
+			t.Errorf("keybindings from DefaultYAML = %+v, want the default preset and no bindings", cfg.Keybindings)
+		}
+
 		// Normalize the spellings that legitimately differ from Default().
 		cfg.Alerts.RuleOverrides = nil
 		cfg.Theme = ThemeConfig{}
 		cfg.Layout = LayoutConfig{}
+		cfg.Keybindings = KeybindingsConfig{}
 		if len(cfg.Filters.Status) == 0 {
 			cfg.Filters.Status = nil
 		}

@@ -80,7 +80,9 @@ filters:
 }
 
 // The theme, layout and keybindings sections are decoded as raw data and
-// interpreted by the UI layer. Keybindings are not interpreted yet.
+// interpreted by the UI layer (ui.ResolveTheme, ui.BuildKeymap), which is where
+// a reserved key such as ctrl+c is refused: this package does not know the keys
+// or the actions.
 func TestFutureSectionsAreKeptAsRawData(t *testing.T) {
 	cfg, err := loadYAML(t, `
 theme:

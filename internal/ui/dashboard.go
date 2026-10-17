@@ -18,6 +18,7 @@ type Dashboard struct {
 	daemonError        error
 	app                *tview.Application
 	alertsModal        *tview.Table
+	helpTable          *tview.Table
 	searchField        *tview.InputField
 	logsView           *tview.TextView
 	resourcesView      *tview.TextView
@@ -27,19 +28,25 @@ type Dashboard struct {
 	servicesTable      *tview.Table
 	daemonErrView      *tview.TextView
 	filterState        filter.FilterState
+	keymap             Keymap
 	theme              Theme
 	visible            panelVisibility
 	userScrolling      bool
 	firstRender        bool
 	awsViewMode        bool
 	showingAlertsModal bool
+	showingHelp        bool
 }
 
-// Options customizes a Dashboard. The zero value gives the built-in look: the
-// dark theme and every panel visible with equal heights.
+// Options customizes a Dashboard. The zero value gives the built-in look and
+// keys: the dark theme, every panel visible with equal heights and the default
+// keymap.
 type Options struct {
 	// Theme is the resolved color theme; nil means the dark theme.
 	Theme *Theme
+	// Keymap says which key runs which action, as built by BuildKeymap; nil
+	// means the default keymap.
+	Keymap *Keymap
 	// Layout says which panels are shown and their relative heights. It is
 	// expected to have passed config.Validate.
 	Layout config.LayoutConfig
@@ -50,15 +57,20 @@ func NewDashboard() *Dashboard {
 	return NewDashboardWithOptions(Options{})
 }
 
-// NewDashboardWithOptions creates a dashboard with the given theme and layout.
-// It applies the theme to tview's global styles, so it must run before another
-// dashboard with a different theme is created.
+// NewDashboardWithOptions creates a dashboard with the given theme, keymap and
+// layout. It applies the theme to tview's global styles, so it must run before
+// another dashboard with a different theme is created.
 func NewDashboardWithOptions(opts Options) *Dashboard {
 	theme := darkTheme()
 	if opts.Theme != nil {
 		theme = *opts.Theme
 	}
 	theme.Apply()
+
+	keymap := DefaultKeymap()
+	if opts.Keymap != nil {
+		keymap = *opts.Keymap
+	}
 
 	app := tview.NewApplication()
 
@@ -81,7 +93,7 @@ func NewDashboardWithOptions(opts Options) *Dashboard {
 
 	helpBar := tview.NewTextView().
 		SetDynamicColors(true).
-		SetText(helpBarText(theme))
+		SetText(helpBarText(theme, keymap))
 	helpBar.SetBorder(false)
 	helpBar.SetBackgroundColor(theme.HelpBarBg) // the TextView version, which also colors the text cells
 
@@ -90,7 +102,7 @@ func NewDashboardWithOptions(opts Options) *Dashboard {
 		SetSelectable(true, false).
 		SetFixed(1, 0)
 	alertsModal.SetBorder(true).
-		SetTitle(alertsModalTitle(theme)).
+		SetTitle(alertsModalTitle(theme, keymap)).
 		SetTitleAlign(tview.AlignCenter).
 		SetBorderColor(theme.StatusError)
 
@@ -110,7 +122,7 @@ func NewDashboardWithOptions(opts Options) *Dashboard {
 
 	errorHelpBar := tview.NewTextView().
 		SetDynamicColors(true).
-		SetText(errorHelpBarText(theme))
+		SetText(errorHelpBarText(theme, keymap))
 	errorHelpBar.SetBorder(false)
 	errorHelpBar.SetBackgroundColor(theme.HelpBarBg)
 
@@ -128,10 +140,14 @@ func NewDashboardWithOptions(opts Options) *Dashboard {
 		AddItem(daemonErrView, 0, 0, 1, 1, 0, 0, false).
 		AddItem(errorHelpBar, 1, 0, 1, 1, 0, 0, false)
 
+	helpTable := newHelpTable(theme, keymap)
+
+	// The help page is added last, so it is drawn on top of the others.
 	pages := tview.NewPages().
 		AddPage("dashboard", grid, true, true).
 		AddPage("alerts_modal", alertsModal, true, false).
-		AddPage("error", errorGrid, true, false)
+		AddPage("error", errorGrid, true, false).
+		AddPage(helpPage, helpTable, true, false)
 
 	app.SetRoot(pages, true)
 	app.EnableMouse(true)
@@ -139,9 +155,11 @@ func NewDashboardWithOptions(opts Options) *Dashboard {
 	dash := &Dashboard{
 		app:           app,
 		theme:         theme,
+		keymap:        keymap,
 		visible:       visibilityOf(opts.Layout),
 		servicesTable: servicesTable,
 		alertsModal:   alertsModal,
+		helpTable:     helpTable,
 		logsView:      logsView,
 		resourcesView: resourcesView,
 		helpBar:       helpBar,
@@ -572,64 +590,13 @@ func (d *Dashboard) Stop() {
 	d.app.Stop()
 }
 
-func (d *Dashboard) handleInput(event *tcell.EventKey) *tcell.EventKey {
-	if d.searchField.HasFocus() || d.app.GetFocus() == d.searchField {
-		return event
-	}
-
-	if event.Key() == tcell.KeyRune {
-		switch event.Rune() {
-		case 'q':
-			d.app.Stop()
-			return nil
-		case '/', 'f':
-			d.app.SetFocus(d.searchField)
-			return nil
-		case 'l', 'L':
-			d.filterState.CycleMinLogLevel()
-			return nil
-		case 'd', 'D':
-			d.awsViewMode = false
-			return nil
-		case 'a', 'A':
-			d.awsViewMode = true
-			return nil
-		case 'w', 'W':
-			d.showingAlertsModal = !d.showingAlertsModal
-			if d.showingAlertsModal {
-				d.pages.SwitchToPage("alerts_modal")
-				d.app.SetFocus(d.alertsModal)
-			} else {
-				d.pages.SwitchToPage("dashboard")
-				d.app.SetFocus(d.mainPanel())
-			}
-			return nil
-		case 'c', 'C':
-			docker.GetGlobalAlertEngine().ClearResolvedAlerts()
-			return nil
-		}
-	}
-	if event.Key() == tcell.KeyEscape {
-		if d.showingAlertsModal {
-			d.showingAlertsModal = false
-			d.pages.SwitchToPage("dashboard")
-			d.app.SetFocus(d.mainPanel())
-			return nil
-		}
-		d.filterState.Clear()
-		d.searchField.SetText("")
-		d.app.SetFocus(d.mainPanel())
-		return nil
-	}
-	return event
-}
-
 func (d *Dashboard) ShowDaemonError(err error) {
 	d.app.QueueUpdateDraw(func() {
 		d.daemonError = err
 		d.daemonErrView.Clear()
 		fmt.Fprint(d.daemonErrView, daemonErrorText(d.theme, err))
-		d.pages.SwitchToPage("error")
+		d.pages.SwitchToPage("error") // hides the help page too
+		d.showingHelp = false
 	})
 }
 
@@ -639,6 +606,7 @@ func (d *Dashboard) ClearDaemonError() {
 			return
 		}
 		d.daemonError = nil
-		d.pages.SwitchToPage("dashboard")
+		d.pages.SwitchToPage("dashboard") // hides the help page too
+		d.showingHelp = false
 	})
 }

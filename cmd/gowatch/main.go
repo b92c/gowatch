@@ -104,6 +104,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	keymap, err := ui.BuildKeymap(cfg.Keybindings)
+	if err != nil {
+		fmt.Fprintf(stderr, "gowatch: %v\n", err)
+		return 1
+	}
+
 	ctx := context.Background()
 	apiClient, err := client.New(client.FromEnv)
 	if err != nil {
@@ -136,7 +142,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}()
 	}
 
-	dashboard := ui.NewDashboardWithOptions(ui.Options{Theme: &theme, Layout: cfg.Layout})
+	dashboard := ui.NewDashboardWithOptions(ui.Options{Theme: &theme, Keymap: &keymap, Layout: cfg.Layout})
 	dashboard.ApplyInitialFilters(cfg.Filters.Search, cfg.Filters.Status, cfg.Filters.MinLogLevel())
 
 	go func() {

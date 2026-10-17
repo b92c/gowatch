@@ -1,7 +1,7 @@
 # Active Memory - GoWatch Session
 
 **Data**: 2026-10-17  
-**Status**: P2.2 entregue - Temas e layout básico configuráveis (Fase 2, etapa 2 de 3); P2.1 entregue antes
+**Status**: P2.3 entregue - Atalhos remapeáveis, presets `default`/`vim` e ajuda interativa (Fase 2, etapa 3 de 3); P2.1 e P2.2 entregues antes. Fase 2 concluída, exceto o modo Emacs
 
 ---
 
@@ -13,7 +13,7 @@
 - Decodificação estrita (`KnownFields(true)`): chave com erro de digitação gera erro com arquivo e linha. Erros de YAML, validação e falha ao abrir a porta do receptor OTLP interrompem a inicialização com mensagem no stderr, antes de a TUI abrir.
 - Endurecimento de segurança: o `./gowatch.yaml` (diretório de trabalho, pode vir de um repositório clonado e não confiável) não pode definir `aws.endpoint_url`, ligar o receptor (`tracing.otlp_receiver.enabled: true`) nem definir um `tracing.otlp_receiver.address` fora de `127.0.0.1`, `[::1]` ou `localhost` (`enabled: false` é aceito); `Load` falha com erro que cita arquivo e chave e manda mover para `~/.gowatch/config.yaml` ou usar `--config`. A checagem decodifica o arquivo numa `Config` nova antes de mesclar. Esses valores continuam permitidos em `~/.gowatch/config.yaml` e em `--config`.
 - Também rejeitados: `threshold`/`hysteresis` negativos, NaN ou infinitos, um segundo documento YAML (`---`) no mesmo arquivo e o mesmo ID de regra escrito em duas grafias. No `DefaultYAML()` o `hysteresis` das regras vem comentado, para que editar só o `threshold` funcione.
-- A seção `keybindings` ainda é aceita só como dado bruto e será interpretada e documentada na etapa 3 (P2.3). As seções `theme` e `layout` passaram a ser interpretadas na etapa 2 (ver P2.2 abaixo).
+- As seções `theme`, `layout` e `keybindings` são decodificadas aqui como dado bruto e interpretadas pelo pacote `ui` (ver P2.2 e P2.3 abaixo).
 - `internal/docker/collector.go` ganhou `Options` e `Configure()` (tail de logs, limite de histórico, regras de alerta, AWS). Valores zero mantêm o padrão; `AlertRules` nil mantém as regras padrão e uma lista vazia não-nil desliga os alertas.
 - `internal/aws/client.go` ganhou `Options` e `NewAWSClientManagerWithOptions()`. Variáveis `AWS_*` continuam tendo prioridade; no modo `auto` a config com `region` ou `endpoint_url` também habilita a integração.
 - `internal/ui/dashboard.go` ganhou `ApplyInitialFilters()` (filtros iniciais do config). `Esc` continua limpando todos os filtros.
@@ -29,6 +29,15 @@
 - `cmd/gowatch/main.go`: flag `--theme` (substitui `theme.name`) e `themeFor()`; tema desconhecido, papel desconhecido ou cor ilegível interrompem a inicialização com `gowatch: ...` no stderr antes da TUI, listando os temas válidos.
 - Testes: `legacy_look_test.go` compara o `dark` com literais copiados do commit `0a4c422` (badges, paleta, texto do painel de recursos, textos fixos, cores das células, `tview.Styles`); `theme_render_test.go` e `layout_test.go` desenham o dashboard numa `tcell.SimulationScreen` e conferem caracteres e cores de cada tema e o efeito de ocultar painéis. Uma comparação única, fora do repositório, de 18 quadros (3 tamanhos x 6 estados) entre o commit `0a4c422` e a versão nova, sem config, deu quadros idênticos (caracteres e cor de frente, fundo e atributos de cada célula).
 
+### P2.3 - Atalhos configuráveis e ajuda interativa
+- `internal/ui/keymap.go`: `Action` (15 ações: `help`, `quit`, `docker_view`, `aws_view`, `search`, `cycle_log_level`, `clear_filter`, `toggle_alerts`, `clear_resolved_alerts`, `scroll_up`, `scroll_down`, `page_up`, `page_down`, `scroll_top`, `scroll_bottom`), cada uma com grupo (General, Views, Filters, Alerts, Navigation) e descrição que alimentam a ajuda. `ParseKey()` lê runas (maiúscula e minúscula são teclas diferentes), `ctrl+<letra>`, `space`, `esc`/`escape`, `enter`, `tab`, `up`, `down`, `pgup`, `pgdn`, `home` e `end` num `KeyCombo` (sem modificadores: `Lookup` os ignora, como o `handleInput` antigo, então Alt+q ainda sai). Presets `default` (exatamente o mapeamento antigo, mais `?`) e `vim` (`default` + `j`/`k`, `g`/`G`, `Ctrl+D`/`Ctrl+U`; não há `emacs`). `BuildKeymap(config.KeybindingsConfig)` aplica as sobrescritas (cada uma substitui todas as teclas da ação) e agrega os erros em ordem fixa: preset desconhecido, ação desconhecida, lista vazia, tecla inválida, `ctrl+c` (reservado: o tview o usa para sair), tecla repetida na ação, tecla de rolagem nativa dada a outra ação e a mesma tecla em duas ações (calculado sobre o mapa final, então duas ações trocam de teclas sobrescrevendo as duas).
+- Teclas nativas: setas, PgUp/PgDn, Home/End (e Ctrl+F/Ctrl+B do tview) nunca são tomadas pelo `handleInput`; o painel com foco rola com elas em qualquer keymap. As ações `scroll_*` as listam só para a ajuda e a barra, e `BuildKeymap` só aceita cada uma na ação de rolagem correspondente. Teclas não nativas ligadas a ações de rolagem (`j`/`k` no vim) agem sobre o `logsView` (`scroll_bottom` volta ao follow, `userScrolling = false`; as outras marcam `true`; com logs ocultos não fazem nada), sobre a lista de alertas quando ela está aberta, ou sobre a página de ajuda quando é ela que está aberta.
+- `internal/ui/input.go`: `handleInput` e `runAction` saíram do `dashboard.go`. A guarda do campo de busca (todo evento passa) continua a primeira checagem. `internal/ui/help.go`: a página `help` (um `tview.Table` com seções, teclas em `HelpKey`, descrições em `Text`, cabeçalhos em `Accent`, borda e título do tema) gerada do keymap ativo, aberta com `?` por cima das outras páginas (inclusive o modal de alertas, ao qual volta ao fechar). Fecha com as teclas das ações `help` e `quit` e com `Esc`, sem sair do app; enquanto aberta nenhuma outra ação roda. `ShowDaemonError`/`ClearDaemonError` zeram `showingHelp`, porque `SwitchToPage` esconde a ajuda.
+- `internal/ui/texts.go`: a barra de ajuda, o título do modal de alertas e a barra da página de erro saem do keymap (primeira tecla de cada ação principal, nomes `Esc`, `↑`, `↓`, `PgUp`, `PgDn`, `Home`, `End`, `Enter`, `Ctrl+D`, sempre com `tview.Escape`). No `default` o título do modal e a barra da página de erro são idênticos aos literais antigos (inclusive o `[q]` engolido pelo tview); a barra principal ganhou só o item `? Help`, entre `↑↓ Scroll` e `q Quit`.
+- `internal/ui/dashboard.go`: `Options.Keymap` (nil = `default`), campos `keymap`, `helpTable` e `showingHelp`, página `help` no `pages`.
+- `internal/config/defaultyaml.go`: seção `keybindings` (preset ativo, exemplos de `bindings` comentados, tabela das ações com as teclas do `default`, formato das teclas e as regras). `cmd/gowatch/main.go`: `ui.BuildKeymap(cfg.Keybindings)` depois do tema; erro = `gowatch: keybindings...` no stderr, saída 1, antes da TUI.
+- Testes: `input_oracle_test.go` guarda uma cópia literal do `handleInput` do commit `155d4ff` e a compara com o novo (preset `default`) em runas ASCII imprimíveis (e Alt nas relevantes), runas não ASCII, teclas especiais com cada modificador e Ctrl+A..Z, em quatro estados (painel principal, modal de alertas, campo de busca com foco, página de erro), dois layouts e as duas visões: mesmo retorno e mesmo estado (visão, modal, filtros, foco, página, rolagem, alertas resolvidos limpos, saída). A única diferença é `?`, testada à parte. `keymap_test.go`, `texts_test.go`, `help_test.go`, `input_test.go` e `cmd/gowatch/keybindings_test.go` cobrem o resto; `live_test.go`/`interaction_test.go` rodam o `tview.Application` de verdade numa `tcell.SimulationScreen` (abre/fecha a ajuda, `j`/`k`/`G` no vim, `quit` remapeado, barra refletindo o remapeamento).
+
 ### P5.1 - Sistema de Alertas & Limites (Alerting Engine)
 - `internal/alert/types.go` implementou os modelos de dados `Alert`, `AlertRule`, `Severity` e `AlertStatus`, além de regras padrão (`HIGH_CPU`, `HIGH_MEM`, `OOM_KILLED`, `CONTAINER_DOWN`).
 - `internal/alert/engine.go` implementou `AlertEngine` com histerese (resolução apenas abaixo do limite inferior), contadores de amostras consecutivas (*hitCounters*), cálculo seguro de memória (trata `MemLimit == 0`), normalização de CPU por core e auto-resolução de alertas de containers efêmeros.
@@ -36,7 +45,7 @@
 - `internal/docker/collector.go` integrou o `globalAlertEngine` ao ciclo de amostragem `WatchContainers`.
 - `internal/ui/dashboard.go` adicionou resumo compacto de alertas na barra `System Resources`, atalho `w` / `W` para abrir/fechar o modal de Alertas (`alertsModal`) e atalho `c` / `C` para limpar alertas resolvidos.
 
-### P4.0 (Anterior - AWS Integration)
+### Fase 4 do roadmap (Anterior - AWS Integration; o commit a chama de "P3.0")
 - Módulos AWS CloudWatch, Lambda, XRay, CloudFormation e alternância na TUI (`a`/`A`).
 
 ---
@@ -45,12 +54,14 @@
 - P2.1: `make build`, `make test`, `go vet ./...` e `fieldalignment ./...` sem achados; `make go-sec` só com o G115 antigo em `internal/docker/collector.go` (conversão `int64 -> uint64` de `MemTotal`). Smoke test manual: `--print-default-config`, chave com erro de digitação, valor inválido, regra desconhecida e porta OTLP ocupada terminam com código de saída diferente de zero e mensagem clara
 - P2.2: `make test` (com `-race`), `go vet ./...`, `fieldalignment ./...`, `gofmt -l .`, `go mod tidy -diff` e `make build` sem achados; `make go-sec` com 0 achados. Smoke sem TUI: `--theme nope`, cor inválida, papel desconhecido e `height: -1` saem com código 1 e mensagem clara; `height: 0` e `--theme light|nord` passam da validação (a TUI só falha por não haver terminal)
 
+- P2.3: `make test` (com `-race`), `go vet ./...`, `fieldalignment ./...`, `gofmt -l .`, `go mod tidy -diff` e `make build` sem achados; `make go-sec` com 0 achados. Smoke sem TUI: `preset: emacs`, ação desconhecida, tecla inválida, `ctrl+c` vinculado, lista vazia, conflito entre duas ações e tecla repetida saem com código 1 e mensagem clara; `preset: vim`, uma sobrescrita válida e o YAML de `--print-default-config` (também com os exemplos descomentados) passam da validação (a TUI só falha por não haver terminal)
+
 ---
 
 ## Estado atual
-- P2.1 (arquivo de configuração) e P2.2 (temas e layout) entregues; Fase 5.1 entregue anteriormente.
-- Próxima entrega da Fase 2: etapa 3 (P2.3 - atalhos remapeáveis, presets `default`/`vim` e menu de ajuda). Ela se apoia na struct bruta `KeybindingsConfig` já presente em `internal/config`, nos papéis de cor do tema (`HelpKey`, `HelpText`, `HelpBarBg`) e nos textos de `internal/ui/texts.go`, que hoje têm conteúdo fixo.
-- Depois: Canais externos de notificação (P5.2 - Webhooks, Slack, SNS) e Ações de Gerenciamento de Containers (Fase 7).
+- Fase 2 concluída: P2.1 (arquivo de configuração), P2.2 (temas e layout) e P2.3 (atalhos e ajuda). Ficou de fora, de propósito, o modo Emacs. Fase 5.1 entregue anteriormente.
+- Próximas entregas possíveis: Canais externos de notificação (P5.2 - Webhooks, Slack, SNS) e Ações de Gerenciamento de Containers (Fase 7).
+- Numeração: os commits antigos chamam o tracing de "P2.0" e a AWS de "P3.0", enquanto o roadmap os chama de Fase 3 e Fase 4; há uma nota de correspondência em `project-roadmap.md`.
 
 ---
 
@@ -61,12 +72,14 @@
 - Nunca escreva cor fixa em `internal/ui`: use os papéis do `Theme`. Cor nova = papel novo (campo em `Theme`, entrada em `colorRoles`, valor nos quatro temas, README e `DefaultYAML()`); o `dark` precisa continuar igual ao visual original, e `legacy_look_test.go` protege isso.
 - `Theme.Apply()` altera `tview.Styles` (estado global) e precisa rodar antes de criar os primitivos. Testes que criam dashboards com outros temas usam `newTestDashboard`/`restoreStyles` e não rodam em paralelo.
 - Particularidades do código original que o `dark` preserva de propósito: o tview não conhece os nomes `cyan` e `magenta` (o tcell usa `aqua` e `fuchsia`), então `[cyan]`/`[magenta]` sempre foram desenhados na cor padrão do terminal (marcadores `colorLegacyCyan`/`colorLegacyMagenta` em `theme.go`); o texto `[INFO]`, `[WARN]`, `[FATAL]` etc. do badge de nível e o `[q]` da barra da página de erro são lidos pelo tview como tags de cor e não aparecem; `[-]` só restaura a cor de frente, então o fundo do badge FATAL e o negrito dos badges vazam para o resto do log. Corrigir isso muda o visual e fica para uma decisão à parte. Por isso os papéis `log_error`, `log_warn`, `log_info`, `log_debug` e `log_fatal_text` não mudam nada na tela e `log_fatal` só colore o fundo do resto da linha FATAL; não os descreva como "cor do badge" na documentação. O mesmo `[%s]` com o nome do serviço faz o texto da operação raiz dos traces sair na cor padrão do terminal em todos os temas (só com o receptor OTLP ligado).
-- O atalho `w` alterna exibição do modal `alertsModal`.
-- O atalho `c` limpa alertas com status `RESOLVED`.
+- `End` e as outras teclas nativas NÃO voltam a acompanhar os logs: o capture do `logsView` marca `userScrolling = true` com qualquer tecla que recebe, e o `Update` seguinte prende a tela na posição antiga (comportamento anterior à Etapa 3, que o R5 manda preservar). Só uma tecla não nativa de `scroll_bottom` (o `G` do vim) volta ao follow. A ajuda, o README e o `DefaultYAML()` dizem isso e não prometem o contrário (`TestHelpPageDoesNotPromiseFollowingOnEnd`); as descrições das ações de navegação são neutras ("Scroll up one line", "Jump to the bottom") porque as teclas nativas rolam o painel com foco, não só os logs.
+- Teclas: o `handleInput` consulta o `Keymap` e nunca compara runas no código. Ação nova = constante + entrada em `actionTable` + teclas em `defaultPreset` + caso em `runAction` + linha no README e no `DefaultYAML()`. O preset `default` precisa continuar igual às teclas de antes (`input_oracle_test.go`, não enfraquecer nem editar a cópia do código antigo). O tview lê `[x]` como tag de cor, então todo nome de tecla escrito num texto do tview passa por `keyText()` (`tview.Escape`). `Ctrl+C` é reservado e as teclas de rolagem dos painéis nunca são interceptadas. Em qualquer ponto que troque de página (`SwitchToPage`) lembre que a página de ajuda some e `showingHelp` precisa ser zerado.
+- O atalho `w` (ação `toggle_alerts`) alterna exibição do modal `alertsModal`; `c` (ação `clear_resolved_alerts`) limpa alertas com status `RESOLVED`, em qualquer tela.
+- Particularidades do tview que os testes de interação encontraram: `Grid.HasFocus` só é verdadeiro depois do primeiro desenho (só conta itens `visible`, que o `Draw` marca), então um teste que entrega teclas pela raiz precisa desenhar antes; a `TextView` dos logs tem uma última linha vazia (depois do `\n` final), então são duas linhas para cima até a última linha de log sair da tela.
 - REGRA ESTREITA: É estritamente proibido citar co-participação de IA, ferramentas de IA ou referências a IA na construção de código, mensagens de commit, pull requests ou documentação.
 - REGRA ESTREITA: NUNCA criar commits ou executar git push sem a ordem expressa e individual do usuário.
 
 ---
 
 **Encerrado em**: 2026-10-17  
-**Retomar por**: Etapa 3 da Fase 2 (P2.3 - atalhos e ajuda), ou as fases P5.2 / Fase 7 conforme priorizado pelo usuário.
+**Retomar por**: P5.2 / Fase 7 conforme priorizado pelo usuário (a Fase 2 está concluída, menos o modo Emacs).
