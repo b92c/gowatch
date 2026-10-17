@@ -20,6 +20,11 @@ const (
 	defaultOTLPAddress     = "127.0.0.1:4318"
 )
 
+// DefaultThemeName is the theme used when theme.name is empty. The UI package
+// defines the built-in themes; the name lives here so the example configuration
+// can mention it without importing the UI.
+const DefaultThemeName = "dark"
+
 // Config is the complete GoWatch configuration.
 type Config struct {
 	Layout          LayoutConfig      `yaml:"layout"`
@@ -72,14 +77,16 @@ type AWSConfig struct {
 }
 
 // ThemeConfig is the raw theme section. It is decoded here but interpreted by
-// the UI layer.
+// the UI layer, which checks the theme name and the color roles and values.
 type ThemeConfig struct {
 	Colors map[string]string `yaml:"colors"`
 	Name   string            `yaml:"name"`
 }
 
 // LayoutConfig is the raw layout section. It is decoded here but interpreted
-// by the UI layer. A nil Visible means "not configured".
+// by the UI layer. A nil Visible means "not configured", which shows the panel.
+// A Height is a relative weight; 0 means "not configured", which counts as 1.
+// Validate checks the heights.
 type LayoutConfig struct {
 	HelpBar   HelpBarLayout  `yaml:"help_bar"`
 	Resources PanelLayout    `yaml:"resources"`

@@ -96,6 +96,26 @@ func TestValidate(t *testing.T) {
 			c.Alerts.RuleOverrides = RuleOverrides{"high_cpu": {Severity: "info"}}
 		}, []string{"alerts.rules.high_cpu.severity", "info"}},
 
+		{"layout heights unset", func(c *Config) {
+			c.Layout = LayoutConfig{Services: ServicesLayout{Height: 0}, Resources: PanelLayout{Height: 0}, Logs: PanelLayout{Height: 0}}
+		}, nil},
+		{"layout heights at the minimum", func(c *Config) {
+			c.Layout = LayoutConfig{Services: ServicesLayout{Height: 1}, Resources: PanelLayout{Height: 1}, Logs: PanelLayout{Height: 1}}
+		}, nil},
+		{"layout heights at the maximum", func(c *Config) {
+			c.Layout = LayoutConfig{Services: ServicesLayout{Height: 100}, Resources: PanelLayout{Height: 100}, Logs: PanelLayout{Height: 100}}
+		}, nil},
+		{"layout hidden panels are fine", func(c *Config) {
+			c.Layout = LayoutConfig{Resources: PanelLayout{Visible: boolPtr(false)}, Logs: PanelLayout{Visible: boolPtr(false)}, HelpBar: HelpBarLayout{Visible: boolPtr(false)}}
+		}, nil},
+		{"negative services height", func(c *Config) { c.Layout.Services.Height = -1 }, []string{"layout.services.height", "got -1"}},
+		{"negative resources height", func(c *Config) { c.Layout.Resources.Height = -2 }, []string{"layout.resources.height", "got -2"}},
+		{"negative logs height", func(c *Config) { c.Layout.Logs.Height = -3 }, []string{"layout.logs.height", "got -3"}},
+		{"layout height above the maximum", func(c *Config) { c.Layout.Logs.Height = 101 }, []string{"layout.logs.height", "between 1 and 100", "got 101"}},
+		{"every layout problem is reported at once", func(c *Config) {
+			c.Layout = LayoutConfig{Services: ServicesLayout{Height: -1}, Resources: PanelLayout{Height: -1}, Logs: PanelLayout{Height: 1000}}
+		}, []string{"layout.services.height", "layout.resources.height", "layout.logs.height"}},
+
 		{"every problem is reported at once", func(c *Config) {
 			c.RefreshInterval = time.Millisecond
 			c.Logs.TailLines = 0

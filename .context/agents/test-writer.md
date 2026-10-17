@@ -110,7 +110,7 @@ func TestCollector(t *testing.T) {
 - Log line formatting
 
 ### What NOT to Test
-- tview rendering (visual, difficult to test)
+- A real terminal session (use the `tcell.SimulationScreen` helpers in `internal/ui/render_test.go` to check what is drawn)
 - Docker daemon behavior (external dependency)
 
 ## Responsibilities
@@ -126,6 +126,8 @@ func TestCollector(t *testing.T) {
 - `internal/docker/parser_test.go` - Parser tests
 - `internal/docker/collector_test.go` - Collector tests
 - `internal/ui/dashboard_test.go` - UI logic tests
+- `internal/ui/render_test.go` - Helpers that draw the dashboard on a simulated screen and read cell colors
+- `internal/ui/legacy_look_test.go` - Keeps the dark theme identical to the original look
 
 ---
 *Updated for GoWatch project - March 2026*

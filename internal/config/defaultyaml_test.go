@@ -22,7 +22,7 @@ func TestDefaultYAML(t *testing.T) {
 		for k := range doc {
 			got = append(got, k)
 		}
-		want := []string{"refresh_interval", "logs", "history", "filters", "alerts", "tracing", "aws"}
+		want := []string{"refresh_interval", "logs", "history", "filters", "alerts", "tracing", "aws", "theme", "layout"}
 		if len(got) != len(want) {
 			t.Fatalf("sections = %v, want %v", got, want)
 		}
@@ -52,8 +52,25 @@ func TestDefaultYAML(t *testing.T) {
 			t.Errorf("DefaultYAML lists %d rules, want one per built-in rule (%d)", n, len(alert.DefaultRules()))
 		}
 
-		// Normalize the two spellings that legitimately differ from Default().
+		// The theme and layout sections spell out the built-in look, which
+		// Default() leaves empty. They must say exactly that.
+		if cfg.Theme.Name != DefaultThemeName || len(cfg.Theme.Colors) != 0 {
+			t.Errorf("theme from DefaultYAML = %+v, want the %s theme and no color overrides", cfg.Theme, DefaultThemeName)
+		}
+		wantLayout := LayoutConfig{
+			HelpBar:   HelpBarLayout{Visible: boolPtr(true)},
+			Resources: PanelLayout{Visible: boolPtr(true), Height: 1},
+			Logs:      PanelLayout{Visible: boolPtr(true), Height: 1},
+			Services:  ServicesLayout{Height: 1},
+		}
+		if !reflect.DeepEqual(cfg.Layout, wantLayout) {
+			t.Errorf("layout from DefaultYAML = %+v, want %+v", cfg.Layout, wantLayout)
+		}
+
+		// Normalize the spellings that legitimately differ from Default().
 		cfg.Alerts.RuleOverrides = nil
+		cfg.Theme = ThemeConfig{}
+		cfg.Layout = LayoutConfig{}
 		if len(cfg.Filters.Status) == 0 {
 			cfg.Filters.Status = nil
 		}

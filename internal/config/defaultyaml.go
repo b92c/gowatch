@@ -80,5 +80,45 @@ aws:
 `)
 	fmt.Fprintf(&b, "  enabled: %s       # auto | true | false; auto detects the AWS_* environment\n", def.AWS.Enabled)
 
+	b.WriteString(`
+# Color theme: dark (the original look), light, solarized or nord.
+# --theme <name> on the command line overrides the name.
+theme:
+`)
+	fmt.Fprintf(&b, "  name: %s\n", DefaultThemeName)
+	b.WriteString(`  # Override single colors by role. A color is a name (yellow, navy, aqua...) or
+  # #rrggbb; quote the #rrggbb form. The roles are:
+  #   background, text, muted, accent, border, title, info, subheading, faint
+  #   status_ok, status_warn, status_error
+  #   help_bar_bg, help_key, help_text
+  #   log_fatal, log_fatal_text, log_error, log_warn, log_info, log_debug
+  #     The log level badges are not drawn (the UI library reads [INFO] and the
+  #     like as color tags), so for now log_fatal only colors the background of
+  #     the rest of a FATAL line and the other five have no visible effect.
+  #   field_bg, field_hint (the search field and its placeholder)
+  # colors:
+  #   accent: "#ff8800"
+  #   status_error: red
+
+# Panel layout, from top to bottom: services, resources, the search field,
+# logs and the help bar. height is the share of the free space a panel gets
+# relative to the others, from 1 to 100 (1 = equal, 2 = twice as much; 0 or
+# omitted means 1).
+# visible: false removes a panel from the screen. The services table and the
+# search field are always shown; without the logs the focus starts in the
+# services table.
+layout:
+  services:
+    height: 1
+  resources:
+    visible: true
+    height: 1
+  logs:
+    visible: true
+    height: 1
+  help_bar:
+    visible: true
+`)
+
 	return []byte(b.String())
 }

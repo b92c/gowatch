@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/b92c/gowatch/internal/config"
+	"github.com/b92c/gowatch/internal/ui"
+	"github.com/gdamore/tcell/v2"
 )
 
 // The tests only exercise the paths that return before the Docker client and
@@ -36,7 +39,10 @@ func TestParseFlags(t *testing.T) {
 		{name: "config path", args: []string{"--config", "/tmp/x.yaml"}, want: cliOptions{configPath: "/tmp/x.yaml"}},
 		{name: "single dash works too", args: []string{"-config=/tmp/x.yaml"}, want: cliOptions{configPath: "/tmp/x.yaml"}},
 		{name: "print default config", args: []string{"--print-default-config"}, want: cliOptions{printDefaultConfig: true}},
-		{name: "unknown flag", args: []string{"--theme", "light"}, wantErr: "flag provided but not defined"},
+		{name: "theme", args: []string{"--theme", "light"}, want: cliOptions{theme: "light"}},
+		{name: "theme with config", args: []string{"--config", "/tmp/x.yaml", "-theme=nord"}, want: cliOptions{configPath: "/tmp/x.yaml", theme: "nord"}},
+		{name: "unknown flag", args: []string{"--no-such-flag"}, wantErr: "flag provided but not defined"},
+		{name: "theme without a value", args: []string{"--theme"}, wantErr: "needs an argument"},
 		{name: "stray argument", args: []string{"extra"}, wantErr: "unexpected arguments"},
 		{name: "config without a value", args: []string{"--config"}, wantErr: "needs an argument"},
 	}
@@ -87,7 +93,7 @@ func TestRunHelp(t *testing.T) {
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0", code)
 	}
-	for _, want := range []string{"-config", "-print-default-config"} {
+	for _, want := range []string{"-config", "-print-default-config", "-theme", "dark, light, nord, solarized"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Errorf("usage does not mention %s:\n%s", want, stderr.String())
 		}
@@ -206,5 +212,135 @@ func TestRunRefusesRiskySettingsFromWorkingDirectory(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRunThemeErrorsStopStartup(t *testing.T) {
+	dir := t.TempDir()
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{
+			name: "unknown theme from the flag",
+			args: []string{"--theme", "nope"},
+			want: []string{`no built-in theme named "nope"`, "dark, light, nord, solarized"},
+		},
+		{
+			name: "unknown theme in the file",
+			args: []string{"--config", writeConfig(t, dir, "theme.yaml", "theme:\n  name: neon\n")},
+			want: []string{`no built-in theme named "neon"`, "dark, light, nord, solarized"},
+		},
+		{
+			name: "the flag replaces a valid theme in the file",
+			args: []string{"--theme", "nope", "--config", writeConfig(t, dir, "valid.yaml", "theme:\n  name: light\n")},
+			want: []string{`no built-in theme named "nope"`},
+		},
+		{
+			name: "invalid color",
+			args: []string{"--config", writeConfig(t, dir, "color.yaml", "theme:\n  colors:\n    accent: not-a-color\n")},
+			want: []string{"theme.colors.accent", `"not-a-color"`},
+		},
+		{
+			name: "unquoted hex color",
+			args: []string{"--config", writeConfig(t, dir, "hex.yaml", "theme:\n  colors:\n    accent: #ff8800\n")},
+			want: []string{"theme.colors.accent", "quote #rrggbb"},
+		},
+		{
+			name: "unknown color role",
+			args: []string{"--config", writeConfig(t, dir, "role.yaml", "theme:\n  colors:\n    acent: red\n")},
+			want: []string{"theme.colors.acent", "unknown color role", "accent"},
+		},
+		{
+			name: "negative layout height",
+			args: []string{"--config", writeConfig(t, dir, "height.yaml", "layout:\n  resources:\n    height: -1\n")},
+			want: []string{"layout.resources.height", "got -1"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+
+			code := run(tt.args, &stdout, &stderr)
+
+			if code != 1 {
+				t.Errorf("exit code = %d, want 1; stderr: %s", code, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("stdout = %q, want empty", stdout.String())
+			}
+			if !strings.HasPrefix(stderr.String(), "gowatch: ") {
+				t.Errorf("stderr should start with \"gowatch: \", got %q", stderr.String())
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(stderr.String(), want) {
+					t.Errorf("stderr %q does not contain %q", stderr.String(), want)
+				}
+			}
+		})
+	}
+}
+
+func TestThemeFor(t *testing.T) {
+	light := ui.BuiltinThemes()["light"]
+
+	t.Run("no flag keeps the configured theme", func(t *testing.T) {
+		got, err := themeFor(config.ThemeConfig{Name: "light"}, "")
+		if err != nil || got.Background != light.Background {
+			t.Errorf("themeFor() = background %v, error %v, want the light theme", got.Background, err)
+		}
+	})
+	t.Run("the flag replaces the configured name", func(t *testing.T) {
+		got, err := themeFor(config.ThemeConfig{Name: "neon"}, "light")
+		if err != nil || got.Background != light.Background {
+			t.Errorf("themeFor() = background %v, error %v, want the light theme", got.Background, err)
+		}
+	})
+	t.Run("color overrides from the file apply on top of the flag theme", func(t *testing.T) {
+		got, err := themeFor(config.ThemeConfig{Name: "dark", Colors: map[string]string{"accent": "#123456"}}, "light")
+		if err != nil {
+			t.Fatalf("themeFor() error = %v", err)
+		}
+		if got.Background != light.Background || got.Text != light.Text {
+			t.Errorf("themeFor() = %+v, want the light theme", got)
+		}
+		if want := tcell.NewHexColor(0x123456); got.Accent != want {
+			t.Errorf("accent = %v, want the file's %v", got.Accent, want)
+		}
+	})
+	t.Run("an unknown flag value is an error", func(t *testing.T) {
+		if _, err := themeFor(config.ThemeConfig{}, "nope"); err == nil {
+			t.Error("themeFor() with an unknown theme returned no error")
+		}
+	})
+}
+
+// The printed example has to document every theme and color role, load
+// strictly, and describe the built-in look: nothing changes when it is used.
+func TestPrintedDefaultConfigCoversThemeAndLayout(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--print-default-config"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", code, stderr.String())
+	}
+	printed := stdout.String()
+
+	for _, want := range append(ui.ThemeNames(), ui.ColorRoleNames()...) {
+		if !strings.Contains(printed, want) {
+			t.Errorf("--print-default-config does not mention %q", want)
+		}
+	}
+
+	path := writeConfig(t, t.TempDir(), "printed.yaml", printed)
+	cfg, _, err := config.Load(config.LoadOptions{ExplicitPath: path})
+	if err != nil {
+		t.Fatalf("the printed configuration does not load: %v", err)
+	}
+	got, err := ui.ResolveTheme(cfg.Theme)
+	if err != nil {
+		t.Fatalf("the printed theme does not resolve: %v", err)
+	}
+	if want := ui.BuiltinThemes()[config.DefaultThemeName]; !reflect.DeepEqual(got, want) {
+		t.Errorf("printed theme = %+v, want the built-in %s theme %+v", got, config.DefaultThemeName, want)
 	}
 }

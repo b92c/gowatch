@@ -18,6 +18,7 @@ const (
 	maxTailLines       = 5000
 	minHistoryPoints   = 10
 	maxHistoryPoints   = 3600
+	maxLayoutHeight    = 100
 )
 
 // Accepted spellings of aws.enabled.
@@ -47,8 +48,29 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("aws.enabled must be auto, true or false, got %q", c.AWS.Enabled))
 	}
 	errs = append(errs, c.Alerts.validate()...)
+	errs = append(errs, c.Layout.validate()...)
 
 	return errors.Join(errs...)
+}
+
+// validate checks the panel heights. They are relative weights: 0 means "not
+// set" and counts as 1, so only negative or absurdly large values are errors.
+// The upper bound keeps the sum of the weights far from integer overflow.
+func (l LayoutConfig) validate() []error {
+	var errs []error
+	for _, panel := range []struct {
+		name   string
+		height int
+	}{
+		{name: "services", height: l.Services.Height},
+		{name: "resources", height: l.Resources.Height},
+		{name: "logs", height: l.Logs.Height},
+	} {
+		if panel.height < 0 || panel.height > maxLayoutHeight {
+			errs = append(errs, fmt.Errorf("layout.%s.height must be between 1 and %d (0 or omitted means 1), got %d", panel.name, maxLayoutHeight, panel.height))
+		}
+	}
+	return errs
 }
 
 func (a AlertsConfig) validate() []error {

@@ -269,3 +269,53 @@ func TestLoadAcceptsTrailingDocumentSeparator(t *testing.T) {
 		t.Errorf("MaxPoints = %d, want 20", cfg.History.MaxPoints)
 	}
 }
+
+// A layout key a file leaves out keeps the value of the previous layer, and
+// "not set" stays distinguishable from an explicit false.
+func TestLoadLayersLayoutKeyByKey(t *testing.T) {
+	home, work := t.TempDir(), t.TempDir()
+	writeFile(t, globalConfigPath(home), "layout:\n  resources: { visible: false, height: 2 }\n  logs: { height: 3 }\n")
+	writeFile(t, localConfigPath(work), "layout:\n  resources: { height: 4 }\n  help_bar: { visible: false }\n")
+
+	cfg, _, err := Load(LoadOptions{HomeDir: home, WorkDir: work})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	want := LayoutConfig{
+		Resources: PanelLayout{Visible: boolPtr(false), Height: 4},
+		Logs:      PanelLayout{Height: 3},
+		HelpBar:   HelpBarLayout{Visible: boolPtr(false)},
+	}
+	if !reflect.DeepEqual(cfg.Layout, want) {
+		t.Errorf("Layout = %+v, want %+v", cfg.Layout, want)
+	}
+}
+
+func TestLoadRejectsInvalidLayoutHeights(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{"zero is accepted as not set", "layout:\n  resources:\n    height: 0\n", ""},
+		{"negative", "layout:\n  resources:\n    height: -1\n", "layout.resources.height"},
+		{"not a number", "layout:\n  logs:\n    height: tall\n", "line 3"},
+		{"visible must be a boolean", "layout:\n  logs:\n    visible: maybe\n", "line 3"},
+		{"services has no visible flag", "layout:\n  services:\n    visible: false\n", "visible"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := loadYAML(t, tt.yaml)
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("Load() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("Load() error = %v, want it to contain %q", err, tt.want)
+			}
+		})
+	}
+}

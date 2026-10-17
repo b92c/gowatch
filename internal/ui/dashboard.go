@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/b92c/gowatch/internal/alert"
+	"github.com/b92c/gowatch/internal/config"
 	"github.com/b92c/gowatch/internal/docker"
 	"github.com/b92c/gowatch/internal/filter"
 	"github.com/b92c/gowatch/internal/trace"
@@ -15,24 +16,50 @@ import (
 
 type Dashboard struct {
 	daemonError        error
+	app                *tview.Application
+	alertsModal        *tview.Table
 	searchField        *tview.InputField
 	logsView           *tview.TextView
 	resourcesView      *tview.TextView
 	helpBar            *tview.TextView
 	grid               *tview.Grid
-	app                *tview.Application
-	servicesTable      *tview.Table
-	alertsModal        *tview.Table
-	daemonErrView      *tview.TextView
 	pages              *tview.Pages
+	servicesTable      *tview.Table
+	daemonErrView      *tview.TextView
 	filterState        filter.FilterState
+	theme              Theme
+	visible            panelVisibility
 	userScrolling      bool
 	firstRender        bool
 	awsViewMode        bool
 	showingAlertsModal bool
 }
 
+// Options customizes a Dashboard. The zero value gives the built-in look: the
+// dark theme and every panel visible with equal heights.
+type Options struct {
+	// Theme is the resolved color theme; nil means the dark theme.
+	Theme *Theme
+	// Layout says which panels are shown and their relative heights. It is
+	// expected to have passed config.Validate.
+	Layout config.LayoutConfig
+}
+
+// NewDashboard creates a dashboard with the built-in look.
 func NewDashboard() *Dashboard {
+	return NewDashboardWithOptions(Options{})
+}
+
+// NewDashboardWithOptions creates a dashboard with the given theme and layout.
+// It applies the theme to tview's global styles, so it must run before another
+// dashboard with a different theme is created.
+func NewDashboardWithOptions(opts Options) *Dashboard {
+	theme := darkTheme()
+	if opts.Theme != nil {
+		theme = *opts.Theme
+	}
+	theme.Apply()
+
 	app := tview.NewApplication()
 
 	servicesTable := tview.NewTable().
@@ -54,17 +81,18 @@ func NewDashboard() *Dashboard {
 
 	helpBar := tview.NewTextView().
 		SetDynamicColors(true).
-		SetText("[yellow]/[white] Search | [yellow]f[white] Filter | [yellow]l[white] Log Level | [yellow]w[white] Alerts | [yellow]d[white] Docker View | [yellow]a[white] AWS View | [yellow]Esc[white] Clear | [yellow]↑↓[white] Scroll | [yellow]q[white] Quit")
-	helpBar.SetBorder(false).SetBackgroundColor(tcell.ColorBlack)
+		SetText(helpBarText(theme))
+	helpBar.SetBorder(false)
+	helpBar.SetBackgroundColor(theme.HelpBarBg) // the TextView version, which also colors the text cells
 
 	alertsModal := tview.NewTable().
 		SetBorders(true).
 		SetSelectable(true, false).
 		SetFixed(1, 0)
 	alertsModal.SetBorder(true).
-		SetTitle(" 🚨 Active & Recent Alerts ([yellow]Esc[white]/[yellow]w[white] Close | [yellow]c[white] Clear Resolved) ").
+		SetTitle(alertsModalTitle(theme)).
 		SetTitleAlign(tview.AlignCenter).
-		SetBorderColor(tcell.ColorRed)
+		SetBorderColor(theme.StatusError)
 
 	searchField := tview.NewInputField().
 		SetLabel("Search: ").
@@ -78,21 +106,21 @@ func NewDashboard() *Dashboard {
 	daemonErrView.SetBorder(true).
 		SetTitle(" ⚠ Docker Daemon Offline ").
 		SetTitleAlign(tview.AlignCenter).
-		SetBorderColor(tcell.ColorRed)
+		SetBorderColor(theme.StatusError)
 
 	errorHelpBar := tview.NewTextView().
 		SetDynamicColors(true).
-		SetText("[q][yellow] Quit[white] | [gray]Waiting for Docker daemon...[-]")
-	errorHelpBar.SetBorder(false).SetBackgroundColor(tcell.ColorBlack)
+		SetText(errorHelpBarText(theme))
+	errorHelpBar.SetBorder(false)
+	errorHelpBar.SetBackgroundColor(theme.HelpBarBg)
 
-	grid := tview.NewGrid().
-		SetRows(0, 0, 3, 0, 1).
-		SetColumns(0).
-		AddItem(servicesTable, 0, 0, 1, 1, 0, 0, false).
-		AddItem(resourcesView, 1, 0, 1, 1, 0, 0, false).
-		AddItem(searchField, 2, 0, 1, 1, 0, 0, false).
-		AddItem(logsView, 3, 0, 1, 1, 0, 0, true).
-		AddItem(helpBar, 4, 0, 1, 1, 0, 0, false)
+	grid := buildGrid(opts.Layout, [panelCount]tview.Primitive{
+		panelServices:  servicesTable,
+		panelResources: resourcesView,
+		panelSearch:    searchField,
+		panelLogs:      logsView,
+		panelHelpBar:   helpBar,
+	})
 
 	errorGrid := tview.NewGrid().
 		SetRows(0, 1).
@@ -107,10 +135,11 @@ func NewDashboard() *Dashboard {
 
 	app.SetRoot(pages, true)
 	app.EnableMouse(true)
-	app.SetFocus(logsView)
 
 	dash := &Dashboard{
 		app:           app,
+		theme:         theme,
+		visible:       visibilityOf(opts.Layout),
 		servicesTable: servicesTable,
 		alertsModal:   alertsModal,
 		logsView:      logsView,
@@ -124,6 +153,7 @@ func NewDashboard() *Dashboard {
 		userScrolling: false,
 		firstRender:   true,
 	}
+	app.SetFocus(dash.mainPanel())
 
 	logsView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		dash.userScrolling = true
@@ -153,8 +183,12 @@ func (d *Dashboard) ApplyInitialFilters(search string, status []string, minLogLe
 func (d *Dashboard) Update(containers docker.Containers) {
 	filtered := filter.FilterContainers(containers, d.filterState)
 	d.updateServicesTable(filtered)
-	d.updateResourcesView(filtered.Host, filtered.C, filtered.Traces, containers.Alerts)
-	d.updateLogsView(filtered)
+	if d.visible.resources {
+		d.updateResourcesView(filtered.Host, filtered.C, filtered.Traces, containers.Alerts)
+	}
+	if d.visible.logs {
+		d.updateLogsView(filtered)
+	}
 	d.updateAlertsModal(containers.Alerts)
 }
 
@@ -167,12 +201,12 @@ func (d *Dashboard) SetupInputCapture() {
 		if event.Key() == tcell.KeyEscape {
 			d.filterState.Clear()
 			d.searchField.SetText("")
-			d.app.SetFocus(d.logsView)
+			d.app.SetFocus(d.mainPanel())
 			return nil
 		}
 		if event.Key() == tcell.KeyEnter {
 			d.filterState.SetSearch(d.searchField.GetText())
-			d.app.SetFocus(d.logsView)
+			d.app.SetFocus(d.mainPanel())
 			return nil
 		}
 		return event
@@ -180,6 +214,7 @@ func (d *Dashboard) SetupInputCapture() {
 }
 
 func (d *Dashboard) updateServicesTable(containers docker.Containers) {
+	t := d.theme
 	d.servicesTable.Clear()
 
 	if d.awsViewMode {
@@ -187,16 +222,16 @@ func (d *Dashboard) updateServicesTable(containers docker.Containers) {
 		headers := []string{"Resource Name", "Type", "Region", "Status", "Metrics Summary", "Last Updated"}
 		for i, header := range headers {
 			cell := tview.NewTableCell(header).
-				SetTextColor(tcell.ColorYellow).
+				SetTextColor(t.Accent).
 				SetAlign(tview.AlignCenter).
 				SetSelectable(false)
 			d.servicesTable.SetCell(0, i, cell)
 		}
 
 		for row, r := range containers.AWS.Resources {
-			statusColor := tcell.ColorGreen
+			statusColor := t.StatusOK
 			if r.Status != "Active" && r.Status != "CREATE_COMPLETE" && r.Status != "OK" {
-				statusColor = tcell.ColorYellow
+				statusColor = t.StatusWarn
 			}
 
 			metricsStr := ""
@@ -211,12 +246,12 @@ func (d *Dashboard) updateServicesTable(containers docker.Containers) {
 				text  string
 				color tcell.Color
 			}{
-				{r.Name, tcell.ColorWhite},
-				{r.Type, tcell.ColorLightBlue},
-				{r.Region, tcell.ColorGray},
+				{r.Name, t.Text},
+				{r.Type, t.Info},
+				{r.Region, t.Muted},
 				{r.Status, statusColor},
-				{metricsStr, tcell.ColorWhite},
-				{r.LastUpdated.Format("15:04:05"), tcell.ColorGray},
+				{metricsStr, t.Text},
+				{r.LastUpdated.Format("15:04:05"), t.Muted},
 			}
 
 			for col, cell := range cells {
@@ -234,7 +269,7 @@ func (d *Dashboard) updateServicesTable(containers docker.Containers) {
 	headers := []string{"Service", "State", "Image", "CPU %", "Memory", "Net Rx/Tx", "Net Pkts", "Disk R/W", "Disk Ops", "PIDs", "OOM", "Logs"}
 	for i, header := range headers {
 		cell := tview.NewTableCell(header).
-			SetTextColor(tcell.ColorYellow).
+			SetTextColor(t.Accent).
 			SetAlign(tview.AlignCenter).
 			SetSelectable(false)
 		if i == 2 {
@@ -249,9 +284,9 @@ func (d *Dashboard) updateServicesTable(containers docker.Containers) {
 			serviceName = c.ID[:12]
 		}
 
-		stateColor := tcell.ColorGreen
+		stateColor := t.StatusOK
 		if c.State != "running" {
-			stateColor = tcell.ColorRed
+			stateColor = t.StatusError
 		}
 
 		cpuSpark := tview.Escape(RenderSparkline(c.CPUHistory, 10))
@@ -268,27 +303,27 @@ func (d *Dashboard) updateServicesTable(containers docker.Containers) {
 		pids := fmt.Sprintf("%d", c.PIDsCurrent)
 		oomEvents := fmt.Sprintf("%d", c.OOMEvents)
 		logCount := fmt.Sprintf("%d lines", len(c.Log))
-		oomColor := tcell.ColorGreen
+		oomColor := t.StatusOK
 		if c.OOMEvents > 0 {
-			oomColor = tcell.ColorRed
+			oomColor = t.StatusError
 		}
 
 		cells := []struct {
 			text  string
 			color tcell.Color
 		}{
-			{serviceName, tcell.ColorWhite},
+			{serviceName, t.Text},
 			{c.State, stateColor},
-			{c.Image, tcell.ColorLightBlue},
-			{cpuStr, tcell.ColorWhite},
-			{memStr, tcell.ColorWhite},
-			{netBytes, tcell.ColorWhite},
-			{netPackets, tcell.ColorWhite},
-			{diskBytes, tcell.ColorWhite},
-			{diskOps, tcell.ColorWhite},
-			{pids, tcell.ColorWhite},
+			{c.Image, t.Info},
+			{cpuStr, t.Text},
+			{memStr, t.Text},
+			{netBytes, t.Text},
+			{netPackets, t.Text},
+			{diskBytes, t.Text},
+			{diskOps, t.Text},
+			{pids, t.Text},
 			{oomEvents, oomColor},
-			{logCount, tcell.ColorGray},
+			{logCount, t.Muted},
 		}
 
 		for col, cell := range cells {
@@ -319,6 +354,9 @@ func formatBytes(value uint64) string {
 }
 
 func (d *Dashboard) updateResourcesView(host metrics.HostInfo, containers []docker.Container, traces []trace.Trace, alerts []alert.Alert) {
+	th := d.theme
+	accent, key, muted := th.Tag(th.Accent), th.Tag(th.HelpKey), th.Tag(th.Muted)
+	okTag, warnTag, errTag := th.Tag(th.StatusOK), th.Tag(th.StatusWarn), th.Tag(th.StatusError)
 	d.resourcesView.Clear()
 
 	var totalCPU float64
@@ -342,13 +380,13 @@ func (d *Dashboard) updateResourcesView(host metrics.HostInfo, containers []dock
 		}
 	}
 
-	alertSummary := "[green]OK[-]"
+	alertSummary := okTag + "OK[-]"
 	if critCount > 0 || warnCount > 0 {
-		alertSummary = fmt.Sprintf("[red]%d CRIT[-], [yellow]%d WARN[-] ([yellow]w[-] for details)", critCount, warnCount)
+		alertSummary = fmt.Sprintf("%s%d CRIT[-], %s%d WARN[-] (%sw[-] for details)", errTag, critCount, warnTag, warnCount, key)
 	}
 
-	fmt.Fprintf(d.resourcesView, "[yellow]CPU Cores (Total):[-] %d  |  [yellow]CPU Active:[-] %.2f cores (%.1f%%)  |  [yellow]Alerts:[-] %s\n", host.CPUCount, cpuCoresUsed, totalCPU, alertSummary)
-	fmt.Fprintf(d.resourcesView, "[yellow]Memory Total:[-] %.2f GB  |  [yellow]Used:[-] %.2f MB  |  [yellow]Free:[-] %.2f MB\n", float64(host.MemTotal)/1024/1024/1024, float64(totalMem)/1024/1024, float64(host.MemFree)/1024/1024)
+	fmt.Fprintf(d.resourcesView, accent+"CPU Cores (Total):[-] %d  |  "+accent+"CPU Active:[-] %.2f cores (%.1f%%)  |  "+accent+"Alerts:[-] %s\n", host.CPUCount, cpuCoresUsed, totalCPU, alertSummary)
+	fmt.Fprintf(d.resourcesView, accent+"Memory Total:[-] %.2f GB  |  "+accent+"Used:[-] %.2f MB  |  "+accent+"Free:[-] %.2f MB\n", float64(host.MemTotal)/1024/1024/1024, float64(totalMem)/1024/1024, float64(host.MemFree)/1024/1024)
 
 	errTraces := 0
 	for _, t := range traces {
@@ -356,14 +394,14 @@ func (d *Dashboard) updateResourcesView(host metrics.HostInfo, containers []dock
 			errTraces++
 		}
 	}
-	traceStatus := "[green]OK[-]"
+	traceStatus := okTag + "OK[-]"
 	if errTraces > 0 {
-		traceStatus = fmt.Sprintf("[red]%d Error(s)[-]", errTraces)
+		traceStatus = fmt.Sprintf("%s%d Error(s)[-]", errTag, errTraces)
 	}
-	fmt.Fprintf(d.resourcesView, "[yellow]Traces Active:[-] %d (%s)  |  [gray]Updated: %s[-]", len(traces), traceStatus, time.Now().Format("15:04:05"))
+	fmt.Fprintf(d.resourcesView, accent+"Traces Active:[-] %d (%s)  |  "+muted+"Updated: %s[-]", len(traces), traceStatus, time.Now().Format("15:04:05"))
 
 	if len(traces) > 0 {
-		fmt.Fprintf(d.resourcesView, "\n[cyan]Recent Traces:[-]\n")
+		fmt.Fprintf(d.resourcesView, "\n%sRecent Traces:[-]\n", th.Tag(th.Subheading))
 		startIdx := len(traces) - 2
 		if startIdx < 0 {
 			startIdx = 0
@@ -378,24 +416,25 @@ func (d *Dashboard) updateResourcesView(host metrics.HostInfo, containers []dock
 			}
 			errFlag := ""
 			if tr.HasError {
-				errFlag = " [red][ERR][-]"
+				errFlag = " " + errTag + "[ERR][-]"
 			}
 			tID := tr.TraceID
 			if len(tID) > 12 {
 				tID = tID[:12]
 			}
-			fmt.Fprintf(d.resourcesView, "  • [yellow]%s[-] (%d spans, %v) [%s] %s%s", tID, len(tr.Spans), tr.Duration.Truncate(time.Millisecond), rootSvc, rootOp, errFlag)
+			fmt.Fprintf(d.resourcesView, "  • "+accent+"%s[-] (%d spans, %v) [%s] %s%s", tID, len(tr.Spans), tr.Duration.Truncate(time.Millisecond), rootSvc, rootOp, errFlag)
 		}
 	}
 }
 
 func (d *Dashboard) updateAlertsModal(alerts []alert.Alert) {
+	t := d.theme
 	d.alertsModal.Clear()
 
 	headers := []string{"Status", "Severity", "Service", "Message", "Value", "Fired At"}
 	for i, header := range headers {
 		cell := tview.NewTableCell(header).
-			SetTextColor(tcell.ColorYellow).
+			SetTextColor(t.Accent).
 			SetAlign(tview.AlignCenter).
 			SetSelectable(false)
 		d.alertsModal.SetCell(0, i, cell)
@@ -403,23 +442,23 @@ func (d *Dashboard) updateAlertsModal(alerts []alert.Alert) {
 
 	if len(alerts) == 0 {
 		cell := tview.NewTableCell("No active or recent alerts").
-			SetTextColor(tcell.ColorGreen).
+			SetTextColor(t.StatusOK).
 			SetAlign(tview.AlignCenter)
 		d.alertsModal.SetCell(1, 0, cell)
 		return
 	}
 
 	for row, a := range alerts {
-		statusColor := tcell.ColorRed
+		statusColor := t.StatusError
 		if a.Status == alert.StatusAcknowledged {
-			statusColor = tcell.ColorYellow
+			statusColor = t.StatusWarn
 		} else if a.Status == alert.StatusResolved {
-			statusColor = tcell.ColorGreen
+			statusColor = t.StatusOK
 		}
 
-		severityColor := tcell.ColorYellow
+		severityColor := t.StatusWarn
 		if a.Severity == alert.SeverityCritical {
-			severityColor = tcell.ColorRed
+			severityColor = t.StatusError
 		}
 
 		firedStr := a.FiredAt.Format("15:04:05")
@@ -431,10 +470,10 @@ func (d *Dashboard) updateAlertsModal(alerts []alert.Alert) {
 		}{
 			{string(a.Status), statusColor},
 			{string(a.Severity), severityColor},
-			{a.ServiceName, tcell.ColorWhite},
-			{a.Message, tcell.ColorWhite},
-			{valStr, tcell.ColorWhite},
-			{firedStr, tcell.ColorGray},
+			{a.ServiceName, t.Text},
+			{a.Message, t.Text},
+			{valStr, t.Text},
+			{firedStr, t.Muted},
 		}
 
 		for col, cell := range cells {
@@ -446,42 +485,48 @@ func (d *Dashboard) updateAlertsModal(alerts []alert.Alert) {
 	}
 }
 
-var serviceColors = []string{
-	"yellow", "cyan", "magenta", "green", "blue", "red",
-	"darkcyan", "darkmagenta", "olive", "teal",
-}
-
+// getServiceColor returns the name of the palette color of a service, to be
+// used as a tview tag, [name]. It follows the position of the service in the
+// container list; services that are not listed get the regular text color.
 func (d *Dashboard) getServiceColor(serviceName string, containers docker.Containers) string {
-	for i, c := range containers.C {
-		name := c.Service
-		if name == "" {
-			if len(c.ID) >= 12 {
-				name = c.ID[:12]
-			} else {
-				name = c.ID
+	palette := d.theme.ServicePalette
+	if len(palette) > 0 {
+		for i, c := range containers.C {
+			name := c.Service
+			if name == "" {
+				if len(c.ID) >= 12 {
+					name = c.ID[:12]
+				} else {
+					name = c.ID
+				}
+			}
+			if name == serviceName {
+				return colorName(palette[i%len(palette)])
 			}
 		}
-		if name == serviceName {
-			return serviceColors[i%len(serviceColors)]
-		}
 	}
-	return "white"
+	return colorName(d.theme.Text)
 }
 
-func formatLogBadge(level metrics.LogLevel) string {
+// formatLogBadge returns the tag text of a level badge. tview reads the
+// bracketed level name ([INFO], [FATAL]...) as a color tag, so the name itself
+// is not drawn; the original dashboard behaved the same way and the dark theme
+// must keep these exact strings.
+func (d *Dashboard) formatLogBadge(level metrics.LogLevel) string {
+	t := d.theme
 	switch level {
 	case metrics.LogLevelFatal:
-		return "[white:red:b][FATAL][-]"
+		return "[" + colorName(t.LogFatalText) + ":" + colorName(t.LogFatal) + ":b][FATAL][-]"
 	case metrics.LogLevelError:
-		return "[red::b][ERROR][-]"
+		return "[" + colorName(t.LogError) + "::b][ERROR][-]"
 	case metrics.LogLevelWarn:
-		return "[yellow::b][WARN][-]"
+		return "[" + colorName(t.LogWarn) + "::b][WARN][-]"
 	case metrics.LogLevelInfo:
-		return "[green][INFO][-]"
+		return t.Tag(t.LogInfo) + "[INFO][-]"
 	case metrics.LogLevelDebug:
-		return "[darkgray][DEBUG][-]"
+		return t.Tag(t.LogDebug) + "[DEBUG][-]"
 	case metrics.LogLevelTrace:
-		return "[darkgray][TRACE][-]"
+		return t.Tag(t.LogDebug) + "[TRACE][-]"
 	default:
 		return ""
 	}
@@ -497,13 +542,14 @@ func (d *Dashboard) updateLogsView(containers docker.Containers) {
 	d.logsView.SetTitle(title)
 
 	d.logsView.Clear()
+	accent := d.theme.Tag(d.theme.Accent)
 	for _, fl := range containers.FlatLogs {
 		color := d.getServiceColor(fl.Service, containers)
-		badge := formatLogBadge(fl.Level)
+		badge := d.formatLogBadge(fl.Level)
 		if badge != "" {
 			badge = badge + " "
 		}
-		fmt.Fprintf(d.logsView, "[yellow]%s[-] %s[%s]%s[-]\n", fl.Service, badge, color, tview.Escape(fl.Line))
+		fmt.Fprintf(d.logsView, "%s%s[-] %s[%s]%s[-]\n", accent, fl.Service, badge, color, tview.Escape(fl.Line))
 	}
 
 	if d.firstRender {
@@ -555,7 +601,7 @@ func (d *Dashboard) handleInput(event *tcell.EventKey) *tcell.EventKey {
 				d.app.SetFocus(d.alertsModal)
 			} else {
 				d.pages.SwitchToPage("dashboard")
-				d.app.SetFocus(d.logsView)
+				d.app.SetFocus(d.mainPanel())
 			}
 			return nil
 		case 'c', 'C':
@@ -567,12 +613,12 @@ func (d *Dashboard) handleInput(event *tcell.EventKey) *tcell.EventKey {
 		if d.showingAlertsModal {
 			d.showingAlertsModal = false
 			d.pages.SwitchToPage("dashboard")
-			d.app.SetFocus(d.logsView)
+			d.app.SetFocus(d.mainPanel())
 			return nil
 		}
 		d.filterState.Clear()
 		d.searchField.SetText("")
-		d.app.SetFocus(d.logsView)
+		d.app.SetFocus(d.mainPanel())
 		return nil
 	}
 	return event
@@ -582,24 +628,7 @@ func (d *Dashboard) ShowDaemonError(err error) {
 	d.app.QueueUpdateDraw(func() {
 		d.daemonError = err
 		d.daemonErrView.Clear()
-		fmt.Fprintf(d.daemonErrView,
-			"\n\n\n"+
-				"    [red]██████╗  █████╗ ███████╗███╗   ███╗ ██████╗ ███╗   ██╗[-]\n"+
-				"    [red]██╔══██╗██╔══██╗██╔════╝████╗ ████║██╔═══██╗████╗  ██║[-]\n"+
-				"    [red]██║  ██║███████║█████╗  ██╔████╔██║██║   ██║██╔██╗ ██║[-]\n"+
-				"    [red]██║  ██║██╔══██║██╔══╝  ██║╚██╔╝██║██║   ██║██║╚██╗██║[-]\n"+
-				"    [red]██████╔╝██║  ██║███████╗██║ ╚═╝ ██║╚██████╔╝██║ ╚████║[-]\n"+
-				"    [red]╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═══╝[-]\n\n"+
-				"    [red::b]⚠  Docker Daemon is not running[-]\n\n"+
-				"    [white]GoWatch requires the Docker daemon to monitor containers.[-]\n"+
-				"    [white]Please start Docker and GoWatch will reconnect automatically.[-]\n\n"+
-				"    [gray]How to start Docker:[-]\n"+
-				"    [yellow]  • macOS:[white]  Open Docker Desktop application[-]\n"+
-				"    [yellow]  • Linux:[white]  sudo systemctl start docker[-]\n\n"+
-				"    [gray]Error: %s[-]\n\n"+
-				"    [darkgray]Retrying connection every 2 seconds...[-]",
-			err.Error(),
-		)
+		fmt.Fprint(d.daemonErrView, daemonErrorText(d.theme, err))
 		d.pages.SwitchToPage("error")
 	})
 }

@@ -79,8 +79,8 @@ filters:
 	}
 }
 
-// The theme, layout and keybindings sections are interpreted by later
-// features; for now they only have to be accepted and kept as raw data.
+// The theme, layout and keybindings sections are decoded as raw data and
+// interpreted by the UI layer. Keybindings are not interpreted yet.
 func TestFutureSectionsAreKeptAsRawData(t *testing.T) {
 	cfg, err := loadYAML(t, `
 theme:

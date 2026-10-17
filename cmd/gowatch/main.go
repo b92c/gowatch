@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/b92c/gowatch/internal/aws"
@@ -22,6 +23,7 @@ const otlpShutdownTimeout = 2 * time.Second
 
 type cliOptions struct {
 	configPath         string
+	theme              string
 	printDefaultConfig bool
 }
 
@@ -37,6 +39,7 @@ func parseFlags(args []string, stderr io.Writer) (cliOptions, error) {
 	fs := flag.NewFlagSet("gowatch", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&opts.configPath, "config", "", "path to a config file; replaces ~/.gowatch/config.yaml and ./gowatch.yaml")
+	fs.StringVar(&opts.theme, "theme", "", "color theme ("+strings.Join(ui.ThemeNames(), ", ")+"); overrides theme.name from the config file")
 	fs.BoolVar(&opts.printDefaultConfig, "print-default-config", false, "print a commented example configuration and exit")
 	if err := fs.Parse(args); err != nil {
 		return cliOptions{}, err
@@ -47,6 +50,16 @@ func parseFlags(args []string, stderr io.Writer) (cliOptions, error) {
 		return cliOptions{}, errors.New("unexpected arguments")
 	}
 	return opts, nil
+}
+
+// themeFor resolves the theme to use. The --theme flag, when set, replaces
+// theme.name from the config file; the colors under theme.colors still apply
+// on top of whichever theme is chosen.
+func themeFor(cfg config.ThemeConfig, flagName string) (ui.Theme, error) {
+	if flagName != "" {
+		cfg.Name = flagName
+	}
+	return ui.ResolveTheme(cfg)
 }
 
 // run is main without the process exit, so deferred cleanup always happens. It
@@ -85,6 +98,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	theme, err := themeFor(cfg.Theme, opts.theme)
+	if err != nil {
+		fmt.Fprintf(stderr, "gowatch: %v\n", err)
+		return 1
+	}
+
 	ctx := context.Background()
 	apiClient, err := client.New(client.FromEnv)
 	if err != nil {
@@ -117,7 +136,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}()
 	}
 
-	dashboard := ui.NewDashboard()
+	dashboard := ui.NewDashboardWithOptions(ui.Options{Theme: &theme, Layout: cfg.Layout})
 	dashboard.ApplyInitialFilters(cfg.Filters.Search, cfg.Filters.Status, cfg.Filters.MinLogLevel())
 
 	go func() {

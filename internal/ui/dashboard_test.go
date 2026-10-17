@@ -207,3 +207,40 @@ func TestApplyInitialFilters(t *testing.T) {
 		}
 	})
 }
+
+func TestNewDashboardDefaults(t *testing.T) {
+	restoreStyles(t)
+
+	dash := NewDashboard()
+
+	if !reflect.DeepEqual(dash.theme, darkTheme()) {
+		t.Errorf("default theme = %+v, want the dark theme", dash.theme)
+	}
+	if want := (panelVisibility{resources: true, logs: true, helpBar: true}); dash.visible != want {
+		t.Errorf("default panels = %+v, want all visible", dash.visible)
+	}
+	if dash.app.GetFocus() != dash.logsView {
+		t.Errorf("initial focus = %T, want the logs view", dash.app.GetFocus())
+	}
+}
+
+func TestNewDashboardWithOptionsAppliesTheTheme(t *testing.T) {
+	restoreStyles(t)
+	theme := nordTheme()
+
+	dash := NewDashboardWithOptions(Options{Theme: &theme})
+	dash.logsView.SetChangedFunc(nil)
+
+	if !reflect.DeepEqual(dash.theme, theme) {
+		t.Errorf("dashboard theme = %+v, want %+v", dash.theme, theme)
+	}
+	if got := dash.logsView.GetBackgroundColor(); got != theme.Background {
+		t.Errorf("logs background = %v, want the theme background %v", got, theme.Background)
+	}
+	if got := dash.helpBar.GetBackgroundColor(); got != theme.HelpBarBg {
+		t.Errorf("help bar background = %v, want %v", got, theme.HelpBarBg)
+	}
+	if got := dash.alertsModal.GetBorderColor(); got != theme.StatusError {
+		t.Errorf("alerts modal border = %v, want %v", got, theme.StatusError)
+	}
+}
