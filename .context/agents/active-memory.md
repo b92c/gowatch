@@ -1,7 +1,7 @@
 # Active Memory - GoWatch Session
 
 **Data**: 2026-10-17  
-**Status**: P2.3 entregue - Atalhos remapeáveis, presets `default`/`vim` e ajuda interativa (Fase 2, etapa 3 de 3); P2.1 e P2.2 entregues antes. Fase 2 concluída, exceto o modo Emacs
+**Status**: P2.3 entregue - Atalhos remapeáveis, presets `default`/`vim` e ajuda interativa (Fase 2, etapa 3 de 3); P2.1 e P2.2 entregues antes. Fase 2 concluída, exceto o modo Emacs. O estado das demais fases foi conferido com o código (por item em `project-roadmap.md`; resumo em "Estado atual")
 
 ---
 
@@ -15,7 +15,7 @@
 - Também rejeitados: `threshold`/`hysteresis` negativos, NaN ou infinitos, um segundo documento YAML (`---`) no mesmo arquivo e o mesmo ID de regra escrito em duas grafias. No `DefaultYAML()` o `hysteresis` das regras vem comentado, para que editar só o `threshold` funcione.
 - As seções `theme`, `layout` e `keybindings` são decodificadas aqui como dado bruto e interpretadas pelo pacote `ui` (ver P2.2 e P2.3 abaixo).
 - `internal/docker/collector.go` ganhou `Options` e `Configure()` (tail de logs, limite de histórico, regras de alerta, AWS). Valores zero mantêm o padrão; `AlertRules` nil mantém as regras padrão e uma lista vazia não-nil desliga os alertas.
-- `internal/aws/client.go` ganhou `Options` e `NewAWSClientManagerWithOptions()`. Variáveis `AWS_*` continuam tendo prioridade; no modo `auto` a config com `region` ou `endpoint_url` também habilita a integração.
+- `internal/aws/client.go` ganhou `Options` e `NewAWSClientManagerWithOptions()`. Variáveis `AWS_*` continuam tendo prioridade; no modo `auto` a config com `region` ou `endpoint_url` também marca o estado como habilitado (`Enabled`). Isso só preenche o estado: a integração AWS ainda não faz chamadas (ver "Fase 4 do roadmap" abaixo).
 - `internal/ui/dashboard.go` ganhou `ApplyInitialFilters()` (filtros iniciais do config). `Esc` continua limpando todos os filtros.
 - `cmd/gowatch/main.go` agora tem as flags `--config` e `--print-default-config`, inicia o receptor OTLP quando habilitado (com `Stop` no encerramento) e usa `refresh_interval` no ticker.
 - Sem arquivo de config o comportamento é idêntico ao anterior (2s, tail 50, 60 pontos de histórico, regras padrão, detecção AWS por env, receptor OTLP desligado), com testes cobrindo esses valores.
@@ -45,8 +45,10 @@
 - `internal/docker/collector.go` integrou o `globalAlertEngine` ao ciclo de amostragem `WatchContainers`.
 - `internal/ui/dashboard.go` adicionou resumo compacto de alertas na barra `System Resources`, atalho `w` / `W` para abrir/fechar o modal de Alertas (`alertsModal`) e atalho `c` / `C` para limpar alertas resolvidos.
 
-### Fase 4 do roadmap (Anterior - AWS Integration; o commit a chama de "P3.0")
-- Módulos AWS CloudWatch, Lambda, XRay, CloudFormation e alternância na TUI (`a`/`A`).
+### Fase 4 do roadmap (Anterior - AWS Integration; o commit a chama de "P3.0"): só a estrutura
+- `internal/aws` tem o `AWSClientManager` (estado com `Enabled`, `Region`, `EndpointURL`, `Connected`, `LastError` e `Resources`) e quatro coletores: CloudWatch, Lambda, XRay e CloudFormation. Os coletores devolvem dados fixos (por exemplo as funções `gowatch-auth-handler` e `gowatch-api-processor`) e só os testes os chamam; `SetResources` e `SetConnected` também só são chamados nos testes. `aws-sdk-go-v2` não está no `go.mod` e o `http.Client` do gerenciador nunca é usado: o GoWatch não faz nenhuma chamada à AWS.
+- A TUI tem a alternância `a`/`A` (visão AWS), que monta a tabela com `containers.AWS.Resources`. Como essa lista nunca é preenchida, a tabela fica sempre vazia, com a região no título. As opções `aws.*` e as variáveis `AWS_*` só mudam o estado (`Enabled`, `Region`, `EndpointURL`); a UI lê apenas `Region`.
+- Falta, para a Fase 4 existir de fato: um cliente AWS (o SDK ou outro), ligar os coletores ao ciclo de coleta, preencher o estado e mostrar `Connected` e `LastError` na visão.
 
 ---
 
@@ -59,8 +61,21 @@
 ---
 
 ## Estado atual
-- Fase 2 concluída: P2.1 (arquivo de configuração), P2.2 (temas e layout) e P2.3 (atalhos e ajuda). Ficou de fora, de propósito, o modo Emacs. Fase 5.1 entregue anteriormente.
-- Próximas entregas possíveis: Canais externos de notificação (P5.2 - Webhooks, Slack, SNS) e Ações de Gerenciamento de Containers (Fase 7).
+- Fase 2 concluída: P2.1 (arquivo de configuração), P2.2 (temas e layout) e P2.3 (atalhos e ajuda). Ficou de fora, de propósito, o modo Emacs.
+- Estado das outras fases, conferido com o código em outubro de 2026 (o detalhe de cada item está em `project-roadmap.md`):
+  - Fase 1: P1.2 completa; P1.1, P1.3 e P1.4 parciais.
+  - Fase 3: P3.1 completa; P3.2 parcial; P3.3 não iniciada (só há código provisório: o `Exporter` existe, mas ninguém o chama fora dos testes).
+  - Fase 4: só a estrutura (ver "Fase 4 do roadmap" acima); a visão AWS fica sempre vazia.
+  - Fase 5: P5.1 parcial (limites de CPU e memória, OOM e estado do contêiner; sem limite de disco e sem padrão em logs); P5.2 não iniciada; P5.3 parcial.
+  - Fases 6 e 7: não iniciadas.
+- Candidatas para a próxima entrega (nenhuma foi escolhida; quem prioriza é o usuário):
+  - concluir a P1.4: exportação de logs (nada grava logs em arquivo hoje) e busca por palavra-chave no texto dos logs (a busca só olha serviço, ID e imagem);
+  - P5.2, canais de notificação: não existe nada (nem webhook, nem notificação desktop, nem chat, e-mail ou fila);
+  - P5.3: reconhecer e resolver alertas na UI (`AlertEngine.AcknowledgeAlert` existe e ninguém o chama) e painel de estatísticas;
+  - tornar a Fase 4 real: cliente AWS, ligar os coletores ao ciclo de coleta, preencher o estado e mostrar `Connected`/`LastError`;
+  - lacunas da Fase 3: ligar e configurar o `Exporter` (OTLP, Jaeger), amostragem, flamegraph e ligação log-span;
+  - Fase 7, ações de gerenciamento de contêineres (já constava como próxima entrega possível, ao lado da P5.2): não iniciada; hoje o GoWatch só lê do Docker;
+  - lacunas menores: P1.1 (filtro por status ou label na UI e filtros salvos entre execuções), P1.3 (exibição de min/máx/média: `metrics.FormatStatsSummary` existe e a UI não a usa) e P5.1 (limite de disco e padrão em logs).
 - Numeração: os commits antigos chamam o tracing de "P2.0" e a AWS de "P3.0", enquanto o roadmap os chama de Fase 3 e Fase 4; há uma nota de correspondência em `project-roadmap.md`.
 
 ---
@@ -68,10 +83,12 @@
 ## Notas técnicas importantes
 - A configuração é lida uma única vez na inicialização (sem hot reload). `docker.Configure()` deve ser chamado em `main` antes de o goroutine de coleta começar.
 - Os IDs de regra no YAML são minúsculos (`high_cpu`), enquanto `alert.DefaultRules()` usa maiúsculos (`HIGH_CPU`); a comparação ignora maiúsculas e minúsculas.
+- Canais de notificação futuros (P5.2): URLs de webhook são destinos de dados e precisam seguir o mesmo modelo de confiança de `aws.endpoint_url`: só são aceitas em `~/.gowatch/config.yaml` ou em `--config`, nunca em `./gowatch.yaml` (que pode vir de um repositório clonado e não confiável). Isso vale para qualquer canal novo que envie dados para fora; o ponto de extensão é `Config.untrustedSettings` em `internal/config/untrusted.go`, com teste em `untrusted_test.go`, e a regra também entra no README e no `DefaultYAML()`.
+- `docker.WatchContainers` pede a lista de contêineres sem a opção `All`: contêineres parados não aparecem na tela nem chegam ao motor de alertas. Por isso a regra `CONTAINER_DOWN` só enxerga contêineres em `restarting`.
 - `make field-fix` reordena campos de structs e quebra literais posicionais; use campos nomeados, inclusive nas tabelas de teste.
 - Nunca escreva cor fixa em `internal/ui`: use os papéis do `Theme`. Cor nova = papel novo (campo em `Theme`, entrada em `colorRoles`, valor nos quatro temas, README e `DefaultYAML()`); o `dark` precisa continuar igual ao visual original, e `legacy_look_test.go` protege isso.
 - `Theme.Apply()` altera `tview.Styles` (estado global) e precisa rodar antes de criar os primitivos. Testes que criam dashboards com outros temas usam `newTestDashboard`/`restoreStyles` e não rodam em paralelo.
-- Particularidades do código original que o `dark` preserva de propósito: o tview não conhece os nomes `cyan` e `magenta` (o tcell usa `aqua` e `fuchsia`), então `[cyan]`/`[magenta]` sempre foram desenhados na cor padrão do terminal (marcadores `colorLegacyCyan`/`colorLegacyMagenta` em `theme.go`); o texto `[INFO]`, `[WARN]`, `[FATAL]` etc. do badge de nível e o `[q]` da barra da página de erro são lidos pelo tview como tags de cor e não aparecem; `[-]` só restaura a cor de frente, então o fundo do badge FATAL e o negrito dos badges vazam para o resto do log. Corrigir isso muda o visual e fica para uma decisão à parte. Por isso os papéis `log_error`, `log_warn`, `log_info`, `log_debug` e `log_fatal_text` não mudam nada na tela e `log_fatal` só colore o fundo do resto da linha FATAL; não os descreva como "cor do badge" na documentação. O mesmo `[%s]` com o nome do serviço faz o texto da operação raiz dos traces sair na cor padrão do terminal em todos os temas (só com o receptor OTLP ligado).
+- Particularidades do código original que o `dark` preserva de propósito: o tview não conhece os nomes `cyan` e `magenta` (o tcell usa `aqua` e `fuchsia`), então `[cyan]`/`[magenta]` sempre foram desenhados na cor padrão do terminal (marcadores `colorLegacyCyan`/`colorLegacyMagenta` em `theme.go`); o texto `[INFO]`, `[WARN]`, `[FATAL]` etc. do badge de nível e o `[q]` da barra da página de erro são lidos pelo tview como tags de cor e não aparecem; `[-]` só restaura a cor de frente, então o fundo do badge FATAL e o negrito dos badges vazam para o resto do log. Corrigir isso muda o visual e fica para uma decisão à parte. Por isso os papéis `log_error`, `log_warn`, `log_info`, `log_debug` e `log_fatal_text` não mudam nada na tela e `log_fatal` só colore o fundo do resto da linha FATAL; não os descreva como "cor do badge" na documentação. O mesmo `[%s]` com o nome do serviço faz o texto da operação raiz dos traces sair na cor padrão do terminal em todos os temas (aparece sempre que há traces: vindos do receptor OTLP, quando ligado, ou de linhas de log com contexto de trace).
 - `End` e as outras teclas nativas NÃO voltam a acompanhar os logs: o capture do `logsView` marca `userScrolling = true` com qualquer tecla que recebe, e o `Update` seguinte prende a tela na posição antiga (comportamento anterior à Etapa 3, que o R5 manda preservar). Só uma tecla não nativa de `scroll_bottom` (o `G` do vim) volta ao follow. A ajuda, o README e o `DefaultYAML()` dizem isso e não prometem o contrário (`TestHelpPageDoesNotPromiseFollowingOnEnd`); as descrições das ações de navegação são neutras ("Scroll up one line", "Jump to the bottom") porque as teclas nativas rolam o painel com foco, não só os logs.
 - Teclas: o `handleInput` consulta o `Keymap` e nunca compara runas no código. Ação nova = constante + entrada em `actionTable` + teclas em `defaultPreset` + caso em `runAction` + linha no README e no `DefaultYAML()`. O preset `default` precisa continuar igual às teclas de antes (`input_oracle_test.go`, não enfraquecer nem editar a cópia do código antigo). O tview lê `[x]` como tag de cor, então todo nome de tecla escrito num texto do tview passa por `keyText()` (`tview.Escape`). `Ctrl+C` é reservado e as teclas de rolagem dos painéis nunca são interceptadas. Em qualquer ponto que troque de página (`SwitchToPage`) lembre que a página de ajuda some e `showingHelp` precisa ser zerado.
 - O atalho `w` (ação `toggle_alerts`) alterna exibição do modal `alertsModal`; `c` (ação `clear_resolved_alerts`) limpa alertas com status `RESOLVED`, em qualquer tela.
@@ -82,4 +99,4 @@
 ---
 
 **Encerrado em**: 2026-10-17  
-**Retomar por**: P5.2 / Fase 7 conforme priorizado pelo usuário (a Fase 2 está concluída, menos o modo Emacs).
+**Retomar por**: uma das candidatas listadas em "Estado atual" (P1.4, P5.2, P5.3, Fase 7, tornar a Fase 4 real ou as lacunas da Fase 3), conforme priorizado pelo usuário. A Fase 2 está concluída, menos o modo Emacs.
