@@ -54,15 +54,17 @@ GoWatch is transitioning from MVP (core Docker monitoring + TUI dashboard) to a 
 
 ## Phase 2: Configuration & Customization (Q3 2026)
 
-**P2.1 - Configuration File Support**
-- YAML/TOML config format
-- Paths: ~/.gowatch/config.yaml, ./gowatch.yaml
-- Settings: update interval, log buffer, filters, shortcuts
+**P2.1 - Configuration File Support** ✅
+- YAML config format (`go.yaml.in/yaml/v3`, strict: unknown keys are errors)
+- Paths: ~/.gowatch/config.yaml, ./gowatch.yaml (later files override earlier ones key by key); `--config <file>` replaces both
+- Settings: refresh interval, log tail, history size, initial filters, alert rule overrides, OTLP receiver, AWS
+- `--print-default-config` prints a commented example
+- Theme and layout settings landed with P2.2; shortcut settings land with P2.3
 
-**P2.2 - Theme & UI Customization**
-- Built-in themes (dark, light, solarized, nord)
-- Per-element color customization
-- Layout customization
+**P2.2 - Theme & UI Customization** ✅
+- Built-in themes (dark, light, solarized, nord); `dark` is the original look, and it stays the default
+- `--theme <name>` flag and `theme.name`; per-role color overrides under `theme.colors` (color name or `#rrggbb`)
+- Basic layout customization: show or hide the resources panel, the logs and the help bar, and set relative panel heights under `layout`
 
 **P2.3 - Keyboard Shortcuts & Help System**
 - Vim/Emacs/default modes

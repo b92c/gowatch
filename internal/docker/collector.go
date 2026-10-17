@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"runtime"
+	"strconv"
 	"sync"
 	"time"
 
@@ -26,6 +27,10 @@ type FormattedLog struct {
 	Level   metrics.LogLevel
 }
 
+// defaultLogTailLines is the number of log lines fetched per container when
+// Configure does not override it.
+const defaultLogTailLines = 50
+
 var (
 	previousStats     = make(map[string]container.StatsResponse)
 	historyStore      = make(map[string]metrics.ContainerStats)
@@ -34,13 +39,71 @@ var (
 	globalAWSManager  = aws.NewAWSClientManager()
 	globalAlertEngine = alert.NewAlertEngine(nil)
 	statsMutex        sync.RWMutex
+
+	// settingsMutex guards globalAWSManager and the two values below, which
+	// Configure may replace.
+	settingsMutex    sync.RWMutex
+	logTailLines     = defaultLogTailLines
+	historyMaxPoints = metrics.MaxHistoryPoints
 )
+
+// Options tunes the collector. A zero value keeps the built-in default, so
+// the zero Options changes nothing. AlertRules is the exception: nil keeps the
+// default rules, while an empty non-nil slice installs no rules at all.
+type Options struct {
+	AWS              aws.Options
+	AlertRules       []alert.AlertRule
+	LogTailLines     int
+	HistoryMaxPoints int
+}
+
+// Configure applies o to the collector. Call it once at startup, before the
+// collection loop begins; it is safe to call concurrently with collection.
+func Configure(o Options) {
+	settingsMutex.Lock()
+	if o.LogTailLines > 0 {
+		logTailLines = o.LogTailLines
+	}
+	if o.HistoryMaxPoints > 0 {
+		historyMaxPoints = o.HistoryMaxPoints
+	}
+	if o.AWS != (aws.Options{}) {
+		globalAWSManager = aws.NewAWSClientManagerWithOptions(o.AWS)
+	}
+	settingsMutex.Unlock()
+
+	if o.AlertRules != nil {
+		globalAlertEngine.SetRules(o.AlertRules)
+	}
+}
+
+func currentLogTailLines() int {
+	settingsMutex.RLock()
+	defer settingsMutex.RUnlock()
+	return logTailLines
+}
+
+func currentHistoryMaxPoints() int {
+	settingsMutex.RLock()
+	defer settingsMutex.RUnlock()
+	return historyMaxPoints
+}
+
+// trimHistory keeps only the newest limit points.
+func trimHistory(points []metrics.MetricPoint, limit int) []metrics.MetricPoint {
+	if len(points) > limit {
+		return points[len(points)-limit:]
+	}
+	return points
+}
 
 func GetGlobalTraceStore() *trace.TraceStore {
 	return globalTraceStore
 }
 
 func GetGlobalAWSManager() *aws.AWSClientManager {
+	settingsMutex.RLock()
+	defer settingsMutex.RUnlock()
 	return globalAWSManager
 }
 
@@ -93,12 +156,9 @@ func getContainerStats(ctx context.Context, apiClient *client.Client, containerI
 	h.CPUHistory = append(h.CPUHistory, metrics.MetricPoint{Timestamp: now, Value: stat.CPUPercent})
 	h.MemHistory = append(h.MemHistory, metrics.MetricPoint{Timestamp: now, Value: float64(stat.MemUsage)})
 
-	if len(h.CPUHistory) > metrics.MaxHistoryPoints {
-		h.CPUHistory = h.CPUHistory[1:]
-	}
-	if len(h.MemHistory) > metrics.MaxHistoryPoints {
-		h.MemHistory = h.MemHistory[1:]
-	}
+	maxPoints := currentHistoryMaxPoints()
+	h.CPUHistory = trimHistory(h.CPUHistory, maxPoints)
+	h.MemHistory = trimHistory(h.MemHistory, maxPoints)
 
 	historyStore[containerID] = h
 	return h
@@ -108,7 +168,7 @@ func getContainerLogs(ctx context.Context, apiClient *client.Client, containerID
 	logs, err := apiClient.ContainerLogs(ctx, containerID, client.ContainerLogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
-		Tail:       "50",
+		Tail:       strconv.Itoa(currentLogTailLines()),
 	})
 	if err != nil {
 		return []string{"Error fetching logs"}
@@ -130,7 +190,7 @@ func getHostInfo(ctx context.Context, apiClient *client.Client, totalMemUsed uin
 		if info, err := apiClient.Info(ctx, client.InfoOptions{}); err == nil {
 			cpuCount = info.Info.NCPU
 			if info.Info.MemTotal >= 0 {
-				memTotal = uint64(info.Info.MemTotal)
+				memTotal = uint64(info.Info.MemTotal) // #nosec G115 -- MemTotal is checked to be non-negative above
 			} else {
 				memTotal = 0
 			}
@@ -257,7 +317,7 @@ func WatchContainers(ctx context.Context, apiClient *client.Client) (Containers,
 		}
 	}
 	containers.Traces = globalTraceStore.GetTraces()
-	containers.AWS = globalAWSManager.GetState()
+	containers.AWS = GetGlobalAWSManager().GetState()
 	containers.Alerts = globalAlertEngine.Evaluate(evalData, containers.Host)
 
 	return containers, nil

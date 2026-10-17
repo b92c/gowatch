@@ -29,15 +29,15 @@
       },
       {
         "name": "internal/ui",
-        "description": "Terminal UI dashboard using tcell/tview",
-        "fileCount": 2,
-        "files": ["dashboard.go", "components.go"]
+        "description": "Terminal UI dashboard using tcell/tview: dashboard, themes, panel layout and themed texts",
+        "fileCount": 5,
+        "files": ["dashboard.go", "components.go", "theme.go", "layout.go", "texts.go"]
       },
       {
         "name": "internal/config",
-        "description": "Configuration management",
-        "fileCount": 1,
-        "files": ["config.go"]
+        "description": "YAML configuration: types and defaults, layered loading, validation, untrusted-layer rules, alert rule overrides and the example file",
+        "fileCount": 6,
+        "files": ["config.go", "load.go", "validate.go", "untrusted.go", "alerts.go", "defaultyaml.go"]
       },
       {
         "name": "internal/trace",
@@ -78,15 +78,22 @@
       "name": "Dashboard",
       "path": "internal/ui/dashboard.go",
       "description": "Interactive terminal dashboard with services table, resources panel, and logs view",
-      "exports": ["Dashboard", "NewDashboard"],
-      "dependencies": ["github.com/rivo/tview", "github.com/gdamore/tcell/v2", "internal/docker"]
+      "exports": ["Dashboard", "NewDashboard", "NewDashboardWithOptions", "Options"],
+      "dependencies": ["github.com/rivo/tview", "github.com/gdamore/tcell/v2", "internal/docker", "internal/config"]
+    },
+    {
+      "name": "Theme",
+      "path": "internal/ui/theme.go",
+      "description": "Color roles, the four built-in themes (dark, light, solarized, nord), per-role overrides and tview tag/style helpers",
+      "exports": ["Theme", "BuiltinThemes", "ResolveTheme", "ThemeNames", "ColorRoleNames"],
+      "dependencies": ["github.com/rivo/tview", "github.com/gdamore/tcell/v2", "internal/config"]
     },
     {
       "name": "Main",
       "path": "cmd/gowatch/main.go",
-      "description": "Application entry point - creates Docker client and runs dashboard",
+      "description": "Application entry point - parses flags, loads the config, resolves the theme, creates the Docker client and runs the dashboard",
       "exports": [],
-      "dependencies": ["internal/docker", "internal/ui", "github.com/moby/moby/client"]
+      "dependencies": ["internal/config", "internal/docker", "internal/ui", "github.com/moby/moby/client"]
     }
   ],
   "dependencies": {
