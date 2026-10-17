@@ -1,4 +1,4 @@
-FROM public.ecr.aws/docker/library/golang:1.26-alpine3.23 AS builder
+FROM public.ecr.aws/docker/library/golang:1.27-alpine3.23 AS builder
 
 RUN apk update && apk --no-cache add gcc git make musl-dev
 
