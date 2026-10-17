@@ -1,0 +1,6 @@
+.git
+bin/
+coverage.out
+.superpowers/
+.vscode/
+.env

@@ -5,44 +5,172 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  # Reused by the Release workflow, so a tag is only published after the same
+  # checks that gate pull requests have passed.
+  workflow_call:
 
 permissions:
   contents: read
 
+# Newer runs of the same pull request replace the older ones. Outside pull
+# requests every run gets its own group, so pushes to main and runs called by the
+# Release workflow are neither cancelled nor replaced while they wait. Under
+# workflow_call the caller's event and run id apply.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  build-and-test:
+  # The steps below are the same make targets that `make check` runs locally.
+  # The pinned tool versions live at the top of the makefile.
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26'
+          go-version: "1.26"
           cache: true
 
-      - name: Install dependencies
-        run: go mod download
+      - name: Download and verify modules
+        run: |
+          go mod download
+          go mod verify
 
       - name: Install tools
-        run: |
-          go install github.com/securego/gosec/v2/cmd/gosec@latest
-          go install golang.org/x/tools/go/analysis/passes/fieldalignment/cmd/fieldalignment@latest
+        run: make install-tools
 
-      - name: Run Security Scan 
+      - name: Check formatting (gofmt)
+        run: make fmt-check
+
+      - name: Vet
+        run: make vet
+
+      - name: Check go.mod and go.sum are tidy
+        run: make mod-check
+
+      - name: Check field alignment
+        run: make field-check
+
+      - name: Security scan (gosec)
         run: make go-sec
 
-      - name: Run Tests
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is only covered by the cross-compilation in the build job.
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Run tests (race detector and coverage)
         run: make test-command
 
-      - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          file: ./coverage.out
-          fail_ci_if_error: false
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
-      - name: Build
+      # Keeps the makefile build target exercised on both operating systems.
+      - name: Build with make
         run: make build
+
+      # Tag runs come from the Release workflow, where the token is not passed.
+      # A missing token (pull requests from forks) never fails the job.
+      - name: Upload coverage reports to Codecov
+        if: matrix.os == 'ubuntu-latest' && github.ref_type != 'tag'
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: ./coverage.out
+          disable_search: true
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  # Compiles the same six targets the Release workflow publishes (keep both lists
+  # in sync), so a build break fails the pull request instead of a tag.
+  build:
+    name: Cross build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Cross-compile all release targets
+        run: |
+          status=0
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+            ext=""
+            if [ "$goos" = "windows" ]; then
+              ext=".exe"
+            fi
+            output="dist/gowatch_${goos}_${goarch}${ext}"
+            echo "::group::${goos}/${goarch}"
+            if ! GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags="-s -w" -o "$output" ./cmd/gowatch; then
+              echo "::error title=Build failed::go build failed for ${goos}/${goarch}"
+              status=1
+            fi
+            echo "::endgroup::"
+          done
+          ls -lh dist
+          exit "$status"
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Build only: nothing is pushed, published or kept (the result is discarded,
+      # only the cache is written).
+      - name: Build image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
+        with:
+          context: .
+          file: .setup/build/Dockerfile
+          push: false
+          outputs: type=cacheonly
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
