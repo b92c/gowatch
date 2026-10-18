@@ -196,7 +196,7 @@ func TestParsedKeysMatchTheirEvents(t *testing.T) {
 // legacyKeyTable is the keymap GoWatch had before key bindings were
 // configurable, written out as keys to actions: what handleInput did with each
 // key, copied from commit 155d4ff. The default preset has to be exactly this,
-// plus ? for the help page and the scroll keys the panels handle themselves.
+// plus ? for the help page, e and E for the log export and the scroll keys the panels handle themselves.
 var legacyKeyTable = map[string]Action{
 	"q": ActionQuit,
 	"/": ActionSearch, "f": ActionSearch,
@@ -219,7 +219,7 @@ var nativeKeyTable = map[string]Action{
 func TestDefaultPresetIsTheOriginalKeymap(t *testing.T) {
 	km := DefaultKeymap()
 
-	want := map[string]Action{"?": ActionHelp}
+	want := map[string]Action{"?": ActionHelp, "e": ActionExportLogs, "E": ActionExportLogs}
 	for key, action := range legacyKeyTable {
 		want[key] = action
 	}
@@ -394,7 +394,7 @@ func TestPresetsDoNotUseReservedOrAliasedKeys(t *testing.T) {
 
 func TestActionMetadata(t *testing.T) {
 	want := []string{
-		"help", "quit", "docker_view", "aws_view", "search", "cycle_log_level", "clear_filter",
+		"help", "quit", "docker_view", "aws_view", "search", "cycle_log_level", "export_logs", "clear_filter",
 		"toggle_alerts", "clear_resolved_alerts", "scroll_up", "scroll_down", "page_up", "page_down",
 		"scroll_top", "scroll_bottom",
 	}

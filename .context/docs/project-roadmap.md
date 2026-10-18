@@ -36,7 +36,7 @@ Status checked against the code in October 2026. Legend:
 
 **By phase** (the gaps are listed under each phase and item below)
 
-- Phase 1 🟡: P1.2 is done; P1.1, P1.3 and P1.4 have gaps (no log export, no min/max/average display, no status or label filter while running).
+- Phase 1 🟡: P1.2 and P1.4 are done; P1.1 and P1.3 have gaps (no min/max/average display, no status or label filter while running).
 - Phase 2 ✅: done, except the Emacs keybinding mode.
 - Phase 3 🟡: P3.1 is done; traces from log lines and from the optional OTLP receiver show in the System Resources panel. There is no flamegraph, no log-to-span link and nothing calls the exporter.
 - Phase 4 🟡 (structure only): the AWS code returns fixed data and nothing calls it, so the AWS view is always empty.
@@ -47,7 +47,7 @@ Status checked against the code in October 2026. Legend:
 
 ## Phase 1: Core Monitoring Enhancements (Q2-Q3 2026) 🟡
 
-Phase 1 is partly done: P1.2 is complete, and P1.1, P1.3 and P1.4 each have gaps, listed under the item.
+Phase 1 is partly done: P1.2 and P1.4 are complete, and P1.1 and P1.3 each have gaps, listed under the item.
 
 **P1.1 - Advanced Container Filtering & Search** 🟡
 - Search containers by name, ID, or image
@@ -70,12 +70,12 @@ Status: network bytes and packets, disk read/write bytes and operations, current
 
 Status: the history buffer keeps `history.max_points` samples per container (default 60, which is 2 minutes at the default 2s refresh; accepted range 10-3600). The CPU and memory sparklines are in the services table, and each one draws only the latest 10 samples. Missing: the min/max/average display (`metrics.FormatStatsSummary` exists and is tested, but nothing in the UI calls it).
 
-**P1.4 - Log Management Enhancements** 🟡
+**P1.4 - Log Management Enhancements** ✅
 - Log filtering by container/keyword
 - Log level parsing
 - Log export functionality
 
-Status: log lines are parsed into levels (trace to fatal), `l` filters the logs by minimum level, and the search field narrows the logs to the matching containers. Missing: searching for a keyword inside the log text, and log export (nothing writes logs to a file).
+Status: log lines are parsed into levels (trace to fatal) and `l` filters the logs by minimum level. The search field (`/` or `f`) also searches the log text: the logs panel shows every line of the containers whose name, ID or image match, plus the lines of any other container that contain the text, while the services table still lists only the matching containers. `e` (or `E`) exports the log lines on screen to `gowatch-logs-YYYYMMDD-HHMMSS.json` in the current directory, as one JSON object with the filters used, the line count and the lines. Not included: a regular-expression search, other export formats and a configurable export directory.
 
 ---
 
@@ -250,8 +250,8 @@ Original plan, kept as written:
 
 Where things stand (October 2026). This list is status only and does not change the plan above; the quarters in the phase titles and the months above are those of the original plan and have not been revised.
 
-- **Done**: Phase 2 (except the Emacs mode), P1.2 and P3.1.
-- **Partly done**: P1.1, P1.3 and P1.4 (Phase 1), P3.2 (Phase 3), P5.1 and P5.3 (Phase 5). What is missing is listed under each item.
+- **Done**: Phase 2 (except the Emacs mode), P1.2, P1.4 and P3.1.
+- **Partly done**: P1.1 and P1.3 (Phase 1), P3.2 (Phase 3), P5.1 and P5.3 (Phase 5). What is missing is listed under each item.
 - **Structure only**: Phase 4. The AWS view, its state and the `aws` settings exist, but P4.1-P4.4 have only placeholder code (collectors that return fixed data and are not called), so no real AWS data is read yet.
 - **Not started**: P3.3 (only placeholder code exists: the exporter is not called), P5.2, Phase 6 and Phase 7.
 

@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/b92c/gowatch/internal/alert"
@@ -16,20 +18,30 @@ import (
 
 type Dashboard struct {
 	daemonError        error
+	keymap             Keymap
+	queueUpdate        func(func())
 	app                *tview.Application
+	pages              *tview.Pages
+	daemonErrView      *tview.TextView
+	servicesTable      *tview.Table
 	alertsModal        *tview.Table
-	helpTable          *tview.Table
+	grid               *tview.Grid
 	searchField        *tview.InputField
 	logsView           *tview.TextView
 	resourcesView      *tview.TextView
+	messageTimer       *time.Timer
 	helpBar            *tview.TextView
-	grid               *tview.Grid
-	pages              *tview.Pages
-	servicesTable      *tview.Table
-	daemonErrView      *tview.TextView
+	errorHelpBar       *tview.TextView
+	helpTable          *tview.Table
+	serviceOrder       []string
+	shown              shownSnapshot
 	filterState        filter.FilterState
-	keymap             Keymap
 	theme              Theme
+	messageSeq         uint64
+	messageDelay       time.Duration
+	messageMu          sync.Mutex
+	shownMu            sync.Mutex
+	stopped            atomic.Bool
 	visible            panelVisibility
 	userScrolling      bool
 	firstRender        bool
@@ -163,6 +175,7 @@ func NewDashboardWithOptions(opts Options) *Dashboard {
 		logsView:      logsView,
 		resourcesView: resourcesView,
 		helpBar:       helpBar,
+		errorHelpBar:  errorHelpBar,
 		grid:          grid,
 		pages:         pages,
 		daemonErrView: daemonErrView,
@@ -199,7 +212,13 @@ func (d *Dashboard) ApplyInitialFilters(search string, status []string, minLogLe
 }
 
 func (d *Dashboard) Update(containers docker.Containers) {
-	filtered := filter.FilterContainers(containers, d.filterState)
+	fs := d.filterState // one copy for the filtering and for what the export records
+	filtered := filter.FilterContainers(containers, fs)
+	d.rememberShown(fs, filtered.FlatLogs)
+	d.serviceOrder = d.serviceOrder[:0]
+	for _, c := range containers.C {
+		d.serviceOrder = append(d.serviceOrder, serviceLabel(c))
+	}
 	d.updateServicesTable(filtered)
 	if d.visible.resources {
 		d.updateResourcesView(filtered.Host, filtered.C, filtered.Traces, containers.Alerts)
@@ -510,20 +529,31 @@ func (d *Dashboard) getServiceColor(serviceName string, containers docker.Contai
 	palette := d.theme.ServicePalette
 	if len(palette) > 0 {
 		for i, c := range containers.C {
-			name := c.Service
-			if name == "" {
-				if len(c.ID) >= 12 {
-					name = c.ID[:12]
-				} else {
-					name = c.ID
-				}
+			if serviceLabel(c) == serviceName {
+				return colorName(palette[i%len(palette)])
 			}
+		}
+		// A service listed only because its log lines matched the search is not
+		// in the filtered list: it gets the color it has among all the services.
+		for i, name := range d.serviceOrder {
 			if name == serviceName {
 				return colorName(palette[i%len(palette)])
 			}
 		}
 	}
 	return colorName(d.theme.Text)
+}
+
+// serviceLabel is the name a container goes by in the table and the logs: its
+// service, or the first 12 characters of its ID.
+func serviceLabel(c docker.Container) string {
+	if c.Service != "" {
+		return c.Service
+	}
+	if len(c.ID) >= 12 {
+		return c.ID[:12]
+	}
+	return c.ID
 }
 
 // formatLogBadge returns the tag text of a level badge. tview reads the
@@ -587,6 +617,12 @@ func (d *Dashboard) Run() error {
 }
 
 func (d *Dashboard) Stop() {
+	d.stopped.Store(true)
+	d.messageMu.Lock()
+	if d.messageTimer != nil {
+		d.messageTimer.Stop()
+	}
+	d.messageMu.Unlock()
 	d.app.Stop()
 }
 

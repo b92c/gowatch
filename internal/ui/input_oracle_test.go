@@ -286,6 +286,12 @@ func alertIsPresent(containerID string) bool {
 // isHelpKeyEvent tells the events that press ?, with or without Alt.
 func isHelpKeyEvent(name string) bool { return name == "'?'" || name == "Alt+'?'" }
 
+// isExportKeyEvent tells the events that press e or E, with or without Alt: the
+// keys of the export_logs action, which the original did not have.
+func isExportKeyEvent(name string) bool {
+	return name == "'e'" || name == "'E'" || name == "Alt+'e'" || name == "Alt+'E'"
+}
+
 func TestDefaultKeymapMatchesTheOriginalHandleInput(t *testing.T) {
 	restoreStyles(t)
 
@@ -312,6 +318,9 @@ func TestDefaultKeymapMatchesTheOriginalHandleInput(t *testing.T) {
 				for _, ev := range events {
 					if isHelpKeyEvent(ev.name) && state.name != "search field focused" {
 						continue // the one new key, checked by TestHelpKeyIsTheOnlyDifferenceFromTheOriginal
+					}
+					if isExportKeyEvent(ev.name) && state.name != "search field focused" {
+						continue // the export keys, checked by TestExportKeysAreTheOtherDifferenceFromTheOriginal
 					}
 					opts := Options{Layout: layout}
 					resolvedLegacy := seedResolvedAlert(t)
