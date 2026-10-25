@@ -133,6 +133,21 @@ func TestLoadRestrictsWorkingDirectoryLayer(t *testing.T) {
 	}
 }
 
+// aws.profile only chooses among the user's own credentials, so the
+// working-directory file may set it.
+func TestWorkingDirectoryLayerHonorsAWSProfile(t *testing.T) {
+	home, work := t.TempDir(), t.TempDir()
+	writeFile(t, localConfigPath(work), "aws:\n  profile: dev\n")
+
+	cfg, _, err := Load(LoadOptions{HomeDir: home, WorkDir: work})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.AWS.Profile != "dev" {
+		t.Errorf("AWS.Profile = %q, want dev", cfg.AWS.Profile)
+	}
+}
+
 // The restriction looks at what the working-directory file sets itself, not at
 // the merged result: a trusted layer's endpoint survives, and a working
 // directory file that leaves the key out is fine.

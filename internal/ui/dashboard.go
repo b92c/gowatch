@@ -255,49 +255,7 @@ func (d *Dashboard) updateServicesTable(containers docker.Containers) {
 	d.servicesTable.Clear()
 
 	if d.awsViewMode {
-		d.servicesTable.SetTitle(fmt.Sprintf(" AWS Cloud Resources (%s) ", containers.AWS.Region))
-		headers := []string{"Resource Name", "Type", "Region", "Status", "Metrics Summary", "Last Updated"}
-		for i, header := range headers {
-			cell := tview.NewTableCell(header).
-				SetTextColor(t.Accent).
-				SetAlign(tview.AlignCenter).
-				SetSelectable(false)
-			d.servicesTable.SetCell(0, i, cell)
-		}
-
-		for row, r := range containers.AWS.Resources {
-			statusColor := t.StatusOK
-			if r.Status != "Active" && r.Status != "CREATE_COMPLETE" && r.Status != "OK" {
-				statusColor = t.StatusWarn
-			}
-
-			metricsStr := ""
-			for k, v := range r.Metrics {
-				metricsStr += fmt.Sprintf("%s:%.1f ", k, v)
-			}
-			if metricsStr == "" {
-				metricsStr = "-"
-			}
-
-			cells := []struct {
-				text  string
-				color tcell.Color
-			}{
-				{r.Name, t.Text},
-				{r.Type, t.Info},
-				{r.Region, t.Muted},
-				{r.Status, statusColor},
-				{metricsStr, t.Text},
-				{r.LastUpdated.Format("15:04:05"), t.Muted},
-			}
-
-			for col, cell := range cells {
-				tableCell := tview.NewTableCell(cell.text).
-					SetTextColor(cell.color).
-					SetAlign(tview.AlignLeft)
-				d.servicesTable.SetCell(row+1, col, tableCell)
-			}
-		}
+		d.updateAWSTable(containers.AWS)
 		return
 	}
 

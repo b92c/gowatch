@@ -2,7 +2,7 @@
 
 # GoWatch
 
-GoWatch is a lightweight, real-time monitoring tool **written in Go** for Docker containers. It provides developers with instant visibility into container resource usage, logs, and system metrics directly in the terminal. Perfect for local development environments, GoWatch works with **any service running in Docker** regardless of the programming language, with planned AWS Serverless support for monitoring CloudWatch, XRay, Lambda, and CloudFormation resources.
+GoWatch is a lightweight, real-time monitoring tool **written in Go** for Docker containers. It provides developers with instant visibility into container resource usage, logs, and system metrics directly in the terminal. Perfect for local development environments, GoWatch works with **any service running in Docker** regardless of the programming language. Its AWS view shows the account your AWS credentials belong to; SSO accounts, CloudWatch Logs, Lambda, X-Ray and CloudFormation are planned.
 
 ## Features
 
@@ -16,7 +16,7 @@ GoWatch is a lightweight, real-time monitoring tool **written in Go** for Docker
 - **Keyboard Shortcuts**: Remappable keys, a `vim` preset and an interactive help page (press `?`)
 - **Development Focused**: Perfect for docker-compose environments and local microservice development
 - **Lightweight**: Minimal resource footprint, built in pure Go
-- **Future AWS Integration**: Planned support for AWS services like CloudWatch, XRay, Lambda, and CloudFormation
+- **AWS Identity**: A read-only AWS view (press `a`) that shows the account behind your AWS credentials, found with the standard AWS credential chain; SSO accounts, CloudWatch Logs, Lambda, X-Ray and CloudFormation are planned
 
 ## Development Environment
 
@@ -149,7 +149,7 @@ make field-fix
 gowatch/
 ├── cmd/gowatch/          # Application entry point
 ├── internal/
-│   ├── aws/              # Future AWS integrations (XRay, CloudWatch, Lambda, CloudFormation)
+│   ├── aws/              # AWS client: settings, credentials, identity (CloudWatch, Lambda, X-Ray, CloudFormation planned)
 │   ├── docker/           # Docker monitoring and collection
 │   ├── trace/            # Distributed tracing functionality
 │   ├── ui/               # Terminal UI components and dashboard
@@ -175,7 +175,7 @@ Settings are layered, from lowest to highest priority:
 
 Each file only overrides the keys it sets; everything else keeps the value from the previous layer. Lists (such as `filters.status`) are replaced as a whole, while maps (such as `alerts.rules`) are merged by key. A file that does not exist is skipped. With `--config <file>`, only the built-in defaults and that file are used, and the file must exist.
 
-Because `./gowatch.yaml` may come from a repository you merely cloned, it is not allowed to set `aws.endpoint_url`, to set `tracing.otlp_receiver.enabled` to `true`, or to set a `tracing.otlp_receiver.address` other than `127.0.0.1`, `[::1]` or `localhost`: GoWatch refuses to start and tells you to move the setting to `~/.gowatch/config.yaml` or to pass the file with `--config`. (`tracing.otlp_receiver.enabled: false` is accepted.) `~/.gowatch/config.yaml` and a `--config` file may set all of them.
+Because `./gowatch.yaml` may come from a repository you merely cloned, it is not allowed to set `aws.endpoint_url`, to set `tracing.otlp_receiver.enabled` to `true`, or to set a `tracing.otlp_receiver.address` other than `127.0.0.1`, `[::1]` or `localhost`: GoWatch refuses to start and tells you to move the setting to `~/.gowatch/config.yaml` or to pass the file with `--config`. (`tracing.otlp_receiver.enabled: false` is accepted.) `~/.gowatch/config.yaml` and a `--config` file may set all of them. `aws.profile` is accepted from every file, `./gowatch.yaml` included: it only chooses among the credentials you already have and cannot redirect traffic or expose anything.
 
 Unknown keys, malformed YAML (including a second `---` document) and out-of-range values stop GoWatch at startup with a message on stderr (including the file and line for YAML problems), so a typo never goes unnoticed.
 
@@ -230,6 +230,9 @@ aws:
   region: ""
   endpoint_url: ""
   enabled: auto            # auto | true | false
+  profile: ""              # profile of ~/.aws/config; AWS_PROFILE takes priority; empty means default
+  refresh_interval: 15s    # how often the poller runs (5s-10m); for now it only calls AWS on discovery passes
+  discovery_interval: 60s  # how often the shared files and the identity are read again (15s-1h)
 
 theme:
   name: dark               # dark | light | solarized | nord (--theme replaces it)
@@ -259,9 +262,27 @@ keybindings:               # keyboard shortcuts, see "Keybindings" below
 
 **OTLP receiver.** When `tracing.otlp_receiver.enabled` is `true`, GoWatch listens on `address` and accepts OTLP/HTTP JSON traces on `/v1/traces`, which then show up in the dashboard. Traces are also built from Docker log lines that carry trace context (a W3C `traceparent`, a `trace_id`/`traceId` field, or a `request_id=` key), with or without the receiver. The receiver can only be turned on from `~/.gowatch/config.yaml` or a `--config` file, not from `./gowatch.yaml`. If the address cannot be bound, GoWatch exits with an error before the dashboard opens.
 
-**AWS.** `aws.region` and `aws.endpoint_url` are used when the corresponding environment variables are not set (`AWS_REGION`, then `AWS_DEFAULT_REGION`, then the config file, then `us-east-1`; `AWS_ENDPOINT_URL` before the config file). With `enabled: auto` the AWS integration is marked as enabled when `AWS_ACCESS_KEY_ID`, `AWS_PROFILE`, `AWS_REGION` or `AWS_ENDPOINT_URL` is set, or when the config file sets `region` or `endpoint_url`. `enabled: true` or `enabled: false` always wins.
+**AWS.** GoWatch reads AWS through the AWS SDK for Go v2, so it finds credentials the way the AWS CLI does: environment variables, the shared config and credentials files (SSO profiles included), web identity and container credentials. Instance metadata (the role of an EC2 instance) is only tried with `aws.enabled: true`, never with `auto`, so on an EC2 instance with an instance role set `aws.enabled: true`. With `enabled: auto`, the default, the integration starts only when something configures AWS: one of the variables `AWS_ACCESS_KEY_ID`, `AWS_PROFILE`, `AWS_REGION`, `AWS_DEFAULT_REGION`, `AWS_ENDPOINT_URL`, `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI` or `AWS_CONTAINER_CREDENTIALS_FULL_URI`; `aws.profile`, `aws.region` or `aws.endpoint_url` in a config file; or a shared config file (`AWS_CONFIG_FILE`, otherwise `~/.aws/config`) or shared credentials file (`AWS_SHARED_CREDENTIALS_FILE`, otherwise `~/.aws/credentials`) that exists. Without any of them nothing AWS runs, no call is made and the AWS view says `not configured`. `enabled: true` always starts the integration and `enabled: false` never does.
 
-**Known limitation (AWS).** GoWatch does not call AWS yet: the AWS SDK is not part of it, and the CloudWatch, Lambda, X-Ray and CloudFormation code returns fixed sample data that nothing reads. The `aws` settings and the `AWS_*` variables are accepted and checked, so a config file that sets them stays valid, but they only change an internal state, and the only part of it the dashboard shows is the region. The AWS view (`a`) always shows an empty table, with that region in its title.
+**AWS profile, region and endpoint.** The profile is `AWS_PROFILE`, then `aws.profile`, then `default`. The region is `AWS_REGION`, then `AWS_DEFAULT_REGION`, then `aws.region`, then the region of the profile, then `us-east-1`; once the first pass has loaded the profile, the title of the AWS view shows the region in use. The endpoint is `AWS_ENDPOINT_URL`, then `aws.endpoint_url`, and applies to every AWS client (LocalStack, for example).
+
+**AWS refresh.** GoWatch does the AWS work on its own goroutine, so it never delays startup, the dashboard or the Docker refresh. It runs a pass every `aws.refresh_interval` (15s by default), but for now only the discovery passes call AWS: every `aws.discovery_interval` (60s by default) the pass reloads the shared config and credentials files and asks AWS who the credentials belong to, so keys that you export again while GoWatch runs are picked up without a restart. Each call has a 10 second timeout and the SDK does not retry it: a failure is tried again on the next discovery pass.
+
+**AWS view.** Press `a` (the `aws_view` action). The title is ` AWS Cloud Resources (<region>) <status> `, and the status is one of `not configured`, `disabled`, `connecting`, `connected: <account id>` or `error: <problem>`. Once connected, the table has one `Account` row for the account of the active credentials: the account ID as its name, the status `monitored` and, in the Metrics Summary column, the account ID and the ARN of the caller. When there is no row, a single muted row says why: `AWS not configured: set up the AWS CLI or set aws.enabled: true`, `AWS integration is disabled (aws.enabled: false)`, `Connecting to AWS...` or the problem. If a later pass fails, the account row stays and its status shows the problem. These are the problems GoWatch recognizes, each followed by its hint when there is one (the hint shows in the Status column of the account row or, with no row, in the title and in the single row):
+
+| Problem | Shown as | Hint |
+| --- | --- | --- |
+| No credential provider found | `no AWS credentials found` | `configure the AWS CLI or set aws.enabled: false` |
+| The SSO token is missing or expired | `SSO token expired` | `run aws sso login` |
+| AWS rejects the keys (expired, invalid or wrong signature) | `AWS credentials expired or invalid` | `log in again (for SSO logins, aws sso login and re-export)` |
+| The profile's `credential_process` fails or prints something that is not valid JSON (its output is never shown) | `credential_process failed` | `check the credential_process of the profile` |
+| The call is not allowed | `access denied: <operation>` | |
+| AWS throttles the call (the rest of that pass is skipped) | `throttled by AWS, slowing down` | |
+| Timeout or network error | `AWS unreachable: <cause>`, where the cause is `timeout`, `DNS lookup failed` or `network error` | |
+
+A profile that does not exist is shown as `AWS profile "<name>" not found` (hint: `check AWS_PROFILE or aws.profile`), and any other failure as `<step> failed: <first line of the error>`, cut to 120 characters.
+
+**AWS calls.** The only AWS call GoWatch makes itself is `sts:GetCallerIdentity`, which is read-only. Resolving the credentials may involve the calls of the SDK's own providers, for example for an SSO or an assume-role profile. With an `sso_session` profile and no static keys, the SDK's default credential chain itself may call `sso-oidc:CreateToken` to refresh the SSO token and rewrite its cache file under `~/.aws/sso/cache/`, as the AWS CLI does; GoWatch's own code never writes to `~/.aws`. SSO accounts and CloudWatch Logs are not read yet: the AWS view shows the identity of the active credentials only.
 
 **Themes.** `theme.name` picks one of the built-in themes: `dark` (the default, and the look GoWatch has always had), `light`, `solarized` (Solarized Dark) or `nord`. The `--theme` flag replaces the name from the file. Names are case-insensitive, and an unknown name stops GoWatch at startup with the list of valid ones. The light, solarized and nord themes use true-color values, so they look best in a terminal with true-color support.
 
@@ -321,7 +342,7 @@ keybindings:
 | `scroll_top` | Jump to the top | `Home` | `Home`, `g` |
 | `scroll_bottom` | Jump to the bottom | `End` | `End`, `G` |
 
-The `vim` preset is the `default` preset plus `j`, `k`, `g`, `G`, `Ctrl+D` and `Ctrl+U`. `Ctrl+D` and `Ctrl+U` move a whole page, the height of the logs panel, not half a page as in vim. There is no `emacs` preset. The AWS view (`aws_view`) has no data yet: see the AWS limitation under Options.
+The `vim` preset is the `default` preset plus `j`, `k`, `g`, `G`, `Ctrl+D` and `Ctrl+U`. `Ctrl+D` and `Ctrl+U` move a whole page, the height of the logs panel, not half a page as in vim. There is no `emacs` preset. The AWS view (`aws_view`) shows the identity of the active credentials only: see the AWS notes under Options.
 
 **Keys.** A key is a single character (`q`, `/`, `?`, `G`; upper and lower case are different keys, so `l` and `L` are listed separately), `ctrl+<letter>` (`ctrl+d`), `space`, or one of `esc` (or `escape`), `enter`, `tab`, `up`, `down`, `pgup`, `pgdn`, `home` and `end`. The names are case-insensitive. Quote the keys in YAML, because characters such as `?`, `#`, `,` and `[` mean something to it: `["?", "#"]`. Action names are written in lower case with underscores (`Quit` also works).
 
@@ -367,7 +388,7 @@ The `vim` preset is the `default` preset plus `j`, `k`, `g`, `G`, `Ctrl+D` and `
 }
 ```
 
-Docker monitoring requires zero configuration. For AWS integrations, GoWatch utilizes standard AWS environment variables (e.g., `AWS_REGION`, `AWS_ENDPOINT_URL`, `AWS_PROFILE`) for cloud credential and endpoint setup.
+Docker monitoring requires zero configuration. The AWS view uses the standard AWS setup (the `AWS_*` environment variables and the files in `~/.aws`) for credentials, region and endpoint; see the AWS notes under Options.
 
 ## Use Cases
 

@@ -1,0 +1,150 @@
+package ui
+
+import (
+	"strings"
+
+	"github.com/b92c/gowatch/internal/aws"
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
+)
+
+// Texts and sizes of the AWS table. The explanatory texts fill the single row
+// that stands in for the accounts when there is nothing to list.
+const (
+	explainNotConfigured = "AWS not configured: set up the AWS CLI or set aws.enabled: true"
+	explainDisabled      = "AWS integration is disabled (aws.enabled: false)"
+	explainConnecting    = "Connecting to AWS..."
+	explainNoRows        = "No AWS resources"
+	awsTypeAccount       = "Account"
+	awsNameMaxWidth      = 60
+)
+
+// awsFallbackRegion is the region the title shows for a state that has none:
+// the region the AWS settings fall back to.
+const awsFallbackRegion = "us-east-1"
+
+// awsTableHeaders are the six columns of the AWS table.
+var awsTableHeaders = []string{"Resource Name", "Type", "Region", "Status", "Metrics Summary", "Last Updated"}
+
+// awsRegion is the region the view shows for st.
+func awsRegion(st aws.AWSState) string {
+	if st.Region == "" {
+		return awsFallbackRegion
+	}
+	return st.Region
+}
+
+// awsTitle is the title of the services table in the AWS view: the region the
+// SDK resolved, then the connection status. An error shows its hint only when
+// no row can carry it.
+func awsTitle(st aws.AWSState, hasRows bool) string {
+	return " AWS Cloud Resources (" + tview.Escape(awsRegion(st)) + ") " + tview.Escape(awsStatus(st, hasRows)) + " "
+}
+
+// awsStatus is the status part of the title.
+func awsStatus(st aws.AWSState, hasRows bool) string {
+	switch st.Conn {
+	case aws.ConnDisabled:
+		return "disabled"
+	case aws.ConnConnecting:
+		return "connecting"
+	case aws.ConnConnected:
+		return "connected: " + st.Identity.AccountID
+	case aws.ConnError:
+		status := "error: " + st.LastError.Text
+		if !hasRows && st.LastError.Hint != "" {
+			status += " - " + st.LastError.Hint
+		}
+		return status
+	}
+	return "not configured" // ConnNotConfigured and the zero state
+}
+
+// awsExplanation is the text of the single row shown when there are no
+// accounts to list.
+func awsExplanation(st aws.AWSState) string {
+	switch st.Conn {
+	case aws.ConnDisabled:
+		return explainDisabled
+	case aws.ConnConnecting:
+		return explainConnecting
+	case aws.ConnError:
+		return st.LastError.Message()
+	case aws.ConnConnected:
+		return explainNoRows
+	}
+	return explainNotConfigured // ConnNotConfigured and the zero state
+}
+
+// accountSummary is the Metrics Summary cell of an account: its ID and, for the
+// account of the active credentials, the ARN of the caller.
+func accountSummary(a aws.Account, id aws.Identity) string {
+	if a.Identity && id.ARN != "" {
+		return a.ID + "; " + id.ARN
+	}
+	return a.ID
+}
+
+// awsStatusColor colors a status: red for an error, green for a healthy one
+// and yellow for anything that needs attention or is only a possibility.
+func (d *Dashboard) awsStatusColor(status string) tcell.Color {
+	switch {
+	case strings.HasPrefix(status, "error"):
+		return d.theme.StatusError
+	case status == aws.StatusMonitored,
+		strings.HasPrefix(status, aws.StatusMonitored+" ("),
+		status == aws.StatusFollowing,
+		status == string(aws.ConnConnected):
+		return d.theme.StatusOK
+	}
+	return d.theme.StatusWarn
+}
+
+// updateAWSTable fills the services table with the AWS view: the title, the
+// header and one row per account, or a single muted row that says why there is
+// none. Every text that comes from AWS goes through tview.Escape, because the
+// table reads [text] as a color tag.
+func (d *Dashboard) updateAWSTable(st aws.AWSState) {
+	t := d.theme
+	d.servicesTable.Clear()
+	d.servicesTable.SetTitle(awsTitle(st, len(st.Accounts) > 0))
+
+	for col, header := range awsTableHeaders {
+		d.servicesTable.SetCell(0, col, tview.NewTableCell(header).
+			SetTextColor(t.Accent).
+			SetAlign(tview.AlignCenter).
+			SetSelectable(false))
+	}
+
+	if len(st.Accounts) == 0 {
+		d.servicesTable.SetCell(1, 0, tview.NewTableCell(tview.Escape(awsExplanation(st))).
+			SetTextColor(t.Muted).
+			SetAlign(tview.AlignLeft).
+			SetSelectable(false))
+		return
+	}
+
+	region := awsRegion(st)
+	for row, a := range st.Accounts {
+		cells := []struct {
+			text  string
+			color tcell.Color
+		}{
+			{text: a.Name, color: t.Text},
+			{text: awsTypeAccount, color: t.Info},
+			{text: region, color: t.Muted},
+			{text: a.Status, color: d.awsStatusColor(a.Status)},
+			{text: accountSummary(a, st.Identity), color: t.Text},
+			{text: a.UpdatedAt.Format("15:04:05"), color: t.Muted},
+		}
+		for col, c := range cells {
+			cell := tview.NewTableCell(tview.Escape(c.text)).
+				SetTextColor(c.color).
+				SetAlign(tview.AlignLeft)
+			if col == 0 {
+				cell.SetMaxWidth(awsNameMaxWidth)
+			}
+			d.servicesTable.SetCell(row+1, col, cell)
+		}
+	}
+}

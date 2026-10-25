@@ -51,8 +51,8 @@ var (
 // the zero Options changes nothing. AlertRules is the exception: nil keeps the
 // default rules, while an empty non-nil slice installs no rules at all.
 type Options struct {
-	AWS              aws.Options
 	AlertRules       []alert.AlertRule
+	AWS              aws.Options
 	LogTailLines     int
 	HistoryMaxPoints int
 }
@@ -67,7 +67,7 @@ func Configure(o Options) {
 	if o.HistoryMaxPoints > 0 {
 		historyMaxPoints = o.HistoryMaxPoints
 	}
-	if o.AWS != (aws.Options{}) {
+	if !o.AWS.IsZero() {
 		globalAWSManager = aws.NewAWSClientManagerWithOptions(o.AWS)
 	}
 	settingsMutex.Unlock()

@@ -39,6 +39,9 @@ func TestDefaultMatchesLegacyValues(t *testing.T) {
 	if cfg.AWS.Region != "" || cfg.AWS.EndpointURL != "" {
 		t.Errorf("AWS region/endpoint must default to empty, got %q / %q", cfg.AWS.Region, cfg.AWS.EndpointURL)
 	}
+	if cfg.AWS.Profile != "" || cfg.AWS.RefreshInterval != 0 || cfg.AWS.DiscoveryInterval != 0 {
+		t.Errorf("AWS profile and intervals must default to zero (zero means the built-in 15s and 60s), got %q / %s / %s", cfg.AWS.Profile, cfg.AWS.RefreshInterval, cfg.AWS.DiscoveryInterval)
+	}
 	if cfg.Filters.Search != "" || len(cfg.Filters.Status) != 0 || cfg.Filters.MinLogLevel() != metrics.LogLevelUnknown {
 		t.Errorf("filters must default to none, got %+v", cfg.Filters)
 	}
@@ -54,6 +57,16 @@ func TestAWSRegionAndEndpointAreLoaded(t *testing.T) {
 	}
 	if cfg.AWS.Region != "eu-west-1" || cfg.AWS.EndpointURL != "http://localhost:4566" {
 		t.Errorf("AWS = %+v", cfg.AWS)
+	}
+}
+
+func TestAWSProfileAndIntervalsAreLoaded(t *testing.T) {
+	cfg, err := loadYAML(t, "aws:\n  profile: dev\n  refresh_interval: 30s\n  discovery_interval: 2m\n")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.AWS.Profile != "dev" || cfg.AWS.RefreshInterval != 30*time.Second || cfg.AWS.DiscoveryInterval != 2*time.Minute {
+		t.Errorf("AWS = %+v, want profile dev, refresh 30s and discovery 2m", cfg.AWS)
 	}
 }
 

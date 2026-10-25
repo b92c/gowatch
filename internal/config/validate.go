@@ -19,6 +19,11 @@ const (
 	minHistoryPoints   = 10
 	maxHistoryPoints   = 3600
 	maxLayoutHeight    = 100
+
+	minAWSRefreshInterval   = 5 * time.Second
+	maxAWSRefreshInterval   = 10 * time.Minute
+	minAWSDiscoveryInterval = 15 * time.Second
+	maxAWSDiscoveryInterval = time.Hour
 )
 
 // Accepted spellings of aws.enabled.
@@ -47,10 +52,30 @@ func (c *Config) Validate() error {
 	if !validAWSEnabled(c.AWS.Enabled) {
 		errs = append(errs, fmt.Errorf("aws.enabled must be auto, true or false, got %q", c.AWS.Enabled))
 	}
+	errs = append(errs, c.AWS.validate()...)
 	errs = append(errs, c.Alerts.validate()...)
 	errs = append(errs, c.Layout.validate()...)
 
 	return errors.Join(errs...)
+}
+
+// validate checks the AWS intervals. Zero means "not set" and keeps the
+// built-in value, so only non-zero values are checked.
+func (a AWSConfig) validate() []error {
+	var errs []error
+	for _, interval := range []struct {
+		name     string
+		value    time.Duration
+		min, max time.Duration
+	}{
+		{name: "aws.refresh_interval", value: a.RefreshInterval, min: minAWSRefreshInterval, max: maxAWSRefreshInterval},
+		{name: "aws.discovery_interval", value: a.DiscoveryInterval, min: minAWSDiscoveryInterval, max: maxAWSDiscoveryInterval},
+	} {
+		if interval.value != 0 && (interval.value < interval.min || interval.value > interval.max) {
+			errs = append(errs, fmt.Errorf("%s must be between %s and %s, got %s", interval.name, interval.min, interval.max, interval.value))
+		}
+	}
+	return errs
 }
 
 // validate checks the panel heights. They are relative weights: 0 means "not
