@@ -37,7 +37,7 @@ test-command:
 # `make install` and the CI install their tools through install-tools and
 # install-govulncheck, so the versions below are the only place to bump them.
 
-GOSEC_VERSION ?= v2.29.0
+GOSEC_VERSION ?= v2.30.0
 FIELDALIGNMENT_VERSION ?= v0.52.0
 GOVULNCHECK_VERSION ?= v1.9.0
 

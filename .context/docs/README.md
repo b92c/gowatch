@@ -42,7 +42,7 @@ make docker-build # Build Docker image
 ```
 
 ### Tech Stack
-- **Language**: Go 1.26+
+- **Language**: Go 1.27+
 - **Docker Client**: Moby (github.com/moby/moby)
 - **Terminal UI**: tview + tcell
 - **Observability**: OpenTelemetry (planned)

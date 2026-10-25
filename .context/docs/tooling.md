@@ -12,7 +12,7 @@ scaffoldVersion: "2.0.0"
 
 ## Required Tools
 
-- **Go 1.26+** - Primary language
+- **Go 1.27+** - Primary language
 - **Docker** - Container runtime for testing and development
 - **Docker Compose** - Multi-container orchestration
 - **make** - Build automation
@@ -89,7 +89,7 @@ docker compose up
 # The container mounts /var/run/docker.sock for container monitoring
 ```
 
-The image is built from `.setup/build/Dockerfile` on the stable `golang:1.26-alpine3.23` tag and an `alpine:3.23` runtime, both from the `public.ecr.aws/docker/library` mirror. The build runs `go mod download && go mod verify` and never rewrites `go.mod`. `.dockerignore` keeps `.git`, `bin/`, `coverage.out`, `.superpowers/`, `.vscode/` and `.env` out of the build context. When `go.mod` moves to a new Go release, move the `golang` tag with it.
+The image is built from `.setup/build/Dockerfile` on the stable `golang:1.27-alpine3.23` tag and an `alpine:3.23` runtime, both from the `public.ecr.aws/docker/library` mirror. The build runs `go mod download && go mod verify` and never rewrites `go.mod`. `.dockerignore` keeps `.git`, `bin/`, `coverage.out`, `.superpowers/`, `.vscode/` and `.env` out of the build context. When `go.mod` moves to a new Go release, move the `golang` tag with it.
 
 ## CI/CD
 
@@ -101,7 +101,7 @@ The versions are variables at the top of the "CI CHECKS" block of the `makefile`
 
 | Tool | Variable | Version | Module |
 | --- | --- | --- | --- |
-| gosec | `GOSEC_VERSION` | v2.29.0 | `github.com/securego/gosec/v2/cmd/gosec` |
+| gosec | `GOSEC_VERSION` | v2.30.0 | `github.com/securego/gosec/v2/cmd/gosec` |
 | fieldalignment | `FIELDALIGNMENT_VERSION` | v0.52.0 | `golang.org/x/tools/go/analysis/passes/fieldalignment/cmd/fieldalignment` |
 | govulncheck | `GOVULNCHECK_VERSION` | v1.9.0 | `golang.org/x/vuln/cmd/govulncheck` |
 
@@ -109,7 +109,7 @@ To update one:
 
 ```bash
 go list -m -versions golang.org/x/vuln            # list the available versions
-GOBIN=$(mktemp -d) go install golang.org/x/vuln/cmd/govulncheck@<new version>   # it must build with Go 1.26
+GOBIN=$(mktemp -d) go install golang.org/x/vuln/cmd/govulncheck@<new version>   # it must build with Go 1.27
 # edit the variable in the makefile, then:
 make install-tools install-govulncheck
 make check

@@ -48,7 +48,7 @@ Everything else in Phase 4 waits.
 
 Project rules that bind this work (see `AGENTS.md`, `.context/agents/feature-developer.md`, `.context/docs/project-roadmap.md`):
 
-- Go 1.26. Direct dependencies today: tcell, tview, moby client/api, go.yaml.in/yaml/v3. The AWS SDK modules become direct dependencies; `go mod tidy -diff` must be clean, `govulncheck` clean, and the cross build (several GOOS/GOARCH) must still work. The SDK is pure Go, so cgo is not a concern; the binary gets larger, which is accepted.
+- Go 1.27. Direct dependencies today: tcell, tview, moby client/api, go.yaml.in/yaml/v3. The AWS SDK modules become direct dependencies; `go mod tidy -diff` must be clean, `govulncheck` clean, and the cross build (several GOOS/GOARCH) must still work. The SDK is pure Go, so cgo is not a concern; the binary gets larger, which is accepted.
 - `internal/config` is a leaf package: standard library, the YAML decoder, `internal/alert` and `pkg/metrics` only. It must not import `internal/aws`.
 - Dependency direction: `internal/docker` imports `internal/aws`; `internal/aws` must not import `internal/docker`, `internal/ui` or `internal/filter`. `internal/filter` imports `internal/docker`.
 - The working-directory `./gowatch.yaml` is untrusted (it may come from a cloned repository). `aws.endpoint_url` is already refused from that layer (`internal/config/untrusted.go`). See section 4.9 for the new settings.

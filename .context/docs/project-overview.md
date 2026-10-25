@@ -47,7 +47,7 @@ gowatch/
 
 ## Tech Stack
 
-- **Language**: Go 1.26+
+- **Language**: Go 1.27+
 - **Docker Client**: Moby (`github.com/moby/moby`) - direct Docker daemon API via Unix socket
 - **Terminal UI**: tcell v2 (low-level) + tview (high-level widgets)
 - **AWS**: AWS SDK for Go v2 (`github.com/aws/aws-sdk-go-v2`, a direct dependency: `config`, `credentials`, `feature/ec2/imds`, `service/sts`); read-only, the identity of the active credentials for now
