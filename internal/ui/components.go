@@ -39,10 +39,8 @@ func NewStatusBar() *tview.TextView {
 
 // RenderSparkline creates a small text-based chart using unicode block characters
 func RenderSparkline(values []metrics.MetricPoint, maxPoints int) string {
-	// Unicode block characters: 0:  , 1: ▂, 2: ▃, 3: ▄, 4: ▅, 5: ▆, 6: ▇, 7: █
 	blocks := []rune{' ', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
 
-	// If empty, return a string of spaces of maxPoints length
 	if len(values) == 0 {
 		runes := make([]rune, maxPoints)
 		for i := 0; i < maxPoints; i++ {
@@ -62,10 +60,8 @@ func RenderSparkline(values []metrics.MetricPoint, maxPoints int) string {
 		}
 	}
 
-	// Build the runes slice
 	runes := make([]rune, 0, maxPoints)
 
-	// Add padding runes first if length < maxPoints
 	paddingCount := maxPoints - len(values)
 	for i := 0; i < paddingCount; i++ {
 		runes = append(runes, ' ')

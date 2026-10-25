@@ -1,0 +1,44 @@
+name: Security
+
+# Kept out of the CI workflow on purpose: a vulnerability newly published for the
+# Go standard library or a dependency would otherwise fail unrelated pull requests.
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays at 06:17 UTC
+  workflow_dispatch:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "go.mod"
+      - "go.sum"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+          cache: true
+
+      # The govulncheck version is pinned at the top of the makefile.
+      - name: Install govulncheck
+        run: make install-govulncheck
+
+      - name: Scan for known vulnerabilities
+        run: make vuln

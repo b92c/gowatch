@@ -34,7 +34,7 @@ make go-sec
 # Check field alignment
 echo "Checking field alignment..."
 if command -v fieldalignment >/dev/null 2>&1; then
-    fieldalignment ./... > /tmp/fieldalignment_check.out 2>&1
+    fieldalignment ./... > /tmp/fieldalignment_check.out 2>&1 || true
     if [ -s /tmp/fieldalignment_check.out ]; then
         echo "Field alignment issues found:"
         cat /tmp/fieldalignment_check.out

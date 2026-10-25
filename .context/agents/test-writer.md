@@ -26,6 +26,7 @@ GoWatch monitors Docker containers via the Moby client and displays metrics in a
 - **internal/docker/collector.go** - Container watching logic
 - **internal/docker/parser.go** - Stats and log parsing
 - **internal/ui/dashboard.go** - Terminal dashboard
+- **internal/ui/keymap.go, input.go, help.go** - Keys, key handling and the help page
 - **pkg/metrics/** - Public metric types
 
 ## Testing Framework
@@ -110,7 +111,7 @@ func TestCollector(t *testing.T) {
 - Log line formatting
 
 ### What NOT to Test
-- tview rendering (visual, difficult to test)
+- A real terminal session (use the `tcell.SimulationScreen` helpers in `internal/ui/render_test.go` to check what is drawn)
 - Docker daemon behavior (external dependency)
 
 ## Responsibilities
@@ -126,6 +127,10 @@ func TestCollector(t *testing.T) {
 - `internal/docker/parser_test.go` - Parser tests
 - `internal/docker/collector_test.go` - Collector tests
 - `internal/ui/dashboard_test.go` - UI logic tests
+- `internal/ui/render_test.go` - Helpers that draw the dashboard on a simulated screen and read cell colors
+- `internal/ui/legacy_look_test.go` - Keeps the dark theme identical to the original look
+- `internal/ui/input_oracle_test.go` - Keeps the default keymap identical to the original `handleInput` (a verbatim copy of the old code; never edit it)
+- `internal/ui/live_test.go` - `startLive()`: runs the real application on a simulated screen, injects keys and reads the cells (see `interaction_test.go`)
 
 ---
 *Updated for GoWatch project - March 2026*

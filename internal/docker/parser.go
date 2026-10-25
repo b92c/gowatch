@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"encoding/binary"
 	"io"
 	"strings"
 
@@ -116,26 +117,27 @@ func parseDiskWriteOps(statsJSON container.StatsResponse) uint64 {
 	return total
 }
 
+const (
+	logFrameHeaderSize    = 8
+	logFramePayloadSizeAt = 4
+)
+
 func ParseLogs(rawLogs io.ReadCloser) []string {
 	var logs []string
-	header := make([]byte, 8)
+	frameHeader := make([]byte, logFrameHeaderSize)
 
 	for {
-		// Read the 8-byte Docker multiplexed stream header
-		// Format: [stream_type (1 byte)][padding (3 bytes)][size (4 bytes big-endian)]
-		_, err := io.ReadFull(rawLogs, header)
+		_, err := io.ReadFull(rawLogs, frameHeader)
 		if err != nil {
 			break
 		}
 
-		// Parse payload size from bytes 4-7 (big-endian uint32)
-		size := int(header[4])<<24 | int(header[5])<<16 | int(header[6])<<8 | int(header[7])
-		if size <= 0 {
+		payloadSize := int(binary.BigEndian.Uint32(frameHeader[logFramePayloadSizeAt:]))
+		if payloadSize <= 0 {
 			continue
 		}
 
-		// Read the exact payload bytes for this frame
-		payload := make([]byte, size)
+		payload := make([]byte, payloadSize)
 		_, err = io.ReadFull(rawLogs, payload)
 		if err != nil {
 			break

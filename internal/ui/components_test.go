@@ -12,7 +12,7 @@ func TestRenderSparkline(t *testing.T) {
 		name      string
 		values    []metrics.MetricPoint
 		maxPoints int
-		expected  int // expected RuneCount
+		expected  int
 	}{
 		{
 			name:      "empty values",
