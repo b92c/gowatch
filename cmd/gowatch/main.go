@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,6 +21,9 @@ import (
 
 // otlpShutdownTimeout bounds how long the OTLP receiver may take to stop.
 const otlpShutdownTimeout = 2 * time.Second
+
+// awsShutdownTimeout bounds how long the AWS poller may take to stop.
+const awsShutdownTimeout = 2 * time.Second
 
 type cliOptions struct {
 	configPath         string
@@ -60,6 +64,21 @@ func themeFor(cfg config.ThemeConfig, flagName string) (ui.Theme, error) {
 		cfg.Name = flagName
 	}
 	return ui.ResolveTheme(cfg)
+}
+
+// awsOptions maps the aws section of the configuration to the options of the
+// AWS manager. Settings left empty stay empty, so the manager keeps its
+// built-in values for them.
+func awsOptions(c config.AWSConfig) aws.Options {
+	return aws.Options{
+		Enabled:           c.EnabledOverride(),
+		Region:            c.Region,
+		EndpointURL:       c.EndpointURL,
+		Profile:           c.Profile,
+		Accounts:          slices.Clone(c.Accounts),
+		RefreshInterval:   c.RefreshInterval,
+		DiscoveryInterval: c.DiscoveryInterval,
+	}
 }
 
 // run is main without the process exit, so deferred cleanup always happens. It
@@ -122,12 +141,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 		LogTailLines:     cfg.Logs.TailLines,
 		HistoryMaxPoints: cfg.History.MaxPoints,
 		AlertRules:       cfg.Alerts.Rules(),
-		AWS: aws.Options{
-			Region:      cfg.AWS.Region,
-			EndpointURL: cfg.AWS.EndpointURL,
-			Enabled:     cfg.AWS.EnabledOverride(),
-		},
+		AWS:              awsOptions(cfg.AWS),
 	})
+
+	// The poller does every AWS call on its own goroutine, so starting it never
+	// delays the dashboard; it does nothing unless AWS is enabled.
+	awsCtx, cancelAWS := context.WithCancel(ctx)
+	awsManager := docker.GetGlobalAWSManager()
+	awsManager.Start(awsCtx, nil)
+	defer func() {
+		cancelAWS()
+		stopCtx, cancel := context.WithTimeout(context.Background(), awsShutdownTimeout)
+		defer cancel()
+		_ = awsManager.Stop(stopCtx)
+	}()
 
 	if cfg.Tracing.OTLPReceiver.Enabled {
 		receiver := trace.NewOTLPReceiver(cfg.Tracing.OTLPReceiver.Address, docker.GetGlobalTraceStore())

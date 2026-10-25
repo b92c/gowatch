@@ -75,10 +75,15 @@ alerts:
 
 	b.WriteString(`
 aws:
-  region: ""          # AWS_REGION / AWS_DEFAULT_REGION take priority; falls back to us-east-1
+  region: ""          # AWS_REGION / AWS_DEFAULT_REGION take priority; then the profile's region; falls back to us-east-1
   endpoint_url: ""    # AWS_ENDPOINT_URL takes priority (LocalStack, for example)
 `)
-	fmt.Fprintf(&b, "  enabled: %s       # auto | true | false; auto detects the AWS_* environment\n", def.AWS.Enabled)
+	fmt.Fprintf(&b, "  enabled: %s       # auto | true | false; auto starts only when the environment, this file or ~/.aws configures AWS\n", def.AWS.Enabled)
+	b.WriteString(`  profile: ""         # profile of ~/.aws/config; AWS_PROFILE takes priority; empty means default
+  refresh_interval: 15s     # how often the AWS data is refreshed (5s-10m)
+  discovery_interval: 60s   # how often identity, accounts and log groups are listed again (15s-1h)
+  accounts: []        # more accounts to monitor through SSO: "<account id>" or "<account id>/<role>"
+`)
 
 	b.WriteString(`
 # Color theme: dark (the original look), light, solarized or nord.

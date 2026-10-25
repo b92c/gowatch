@@ -42,6 +42,24 @@ func TestValidate(t *testing.T) {
 		{"aws enabled true", func(c *Config) { c.AWS.Enabled = "true" }, nil},
 		{"aws enabled false", func(c *Config) { c.AWS.Enabled = "false" }, nil},
 		{"aws enabled garbage", func(c *Config) { c.AWS.Enabled = "maybe" }, []string{"aws.enabled", "maybe"}},
+		{"aws refresh unset", func(c *Config) { c.AWS.RefreshInterval = 0 }, nil},
+		{"aws refresh at the minimum", func(c *Config) { c.AWS.RefreshInterval = 5 * time.Second }, nil},
+		{"aws refresh at the maximum", func(c *Config) { c.AWS.RefreshInterval = 10 * time.Minute }, nil},
+		{"aws refresh below the minimum", func(c *Config) { c.AWS.RefreshInterval = 4 * time.Second }, []string{"aws.refresh_interval must be between 5s and 10m0s, got 4s"}},
+		{"aws refresh above the maximum", func(c *Config) { c.AWS.RefreshInterval = 11 * time.Minute }, []string{"aws.refresh_interval must be between 5s and 10m0s, got 11m0s"}},
+		{"aws refresh negative", func(c *Config) { c.AWS.RefreshInterval = -time.Second }, []string{"aws.refresh_interval", "got -1s"}},
+		{"aws discovery at the minimum", func(c *Config) { c.AWS.DiscoveryInterval = 15 * time.Second }, nil},
+		{"aws discovery at the maximum", func(c *Config) { c.AWS.DiscoveryInterval = time.Hour }, nil},
+		{"aws discovery below the minimum", func(c *Config) { c.AWS.DiscoveryInterval = 14 * time.Second }, []string{"aws.discovery_interval must be between 15s and 1h0m0s, got 14s"}},
+		{"aws discovery above the maximum", func(c *Config) { c.AWS.DiscoveryInterval = 61 * time.Minute }, []string{"aws.discovery_interval must be between 15s and 1h0m0s, got 1h1m0s"}},
+		{"aws profile is free text", func(c *Config) { c.AWS.Profile = "dev-sso" }, nil},
+		{"aws accounts valid", func(c *Config) {
+			c.AWS.Accounts = []string{"123456789012", "123456789012/ReadOnly", "210987654321/Role+=,.@-_x"}
+		}, nil},
+		{"aws account too short", func(c *Config) { c.AWS.Accounts = []string{"12345"} }, []string{`aws.accounts[0] must be "<12-digit account id>" or "<12-digit account id>/<role name>", got "12345"`}},
+		{"aws account with an empty role", func(c *Config) { c.AWS.Accounts = []string{"123456789012", "123456789012/"} }, []string{"aws.accounts[1]"}},
+		{"aws account role with a space", func(c *Config) { c.AWS.Accounts = []string{"123456789012/Read Only"} }, []string{"aws.accounts[0]"}},
+		{"aws account thirteen digits", func(c *Config) { c.AWS.Accounts = []string{"1234567890123"} }, []string{"aws.accounts[0]"}},
 
 		{"known rule id", func(c *Config) {
 			c.Alerts.RuleOverrides = RuleOverrides{"high_cpu": {}}

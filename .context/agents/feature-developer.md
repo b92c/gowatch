@@ -19,7 +19,7 @@ This agent specializes in implementing new features for GoWatch, a real-time Doc
 
 GoWatch monitors Docker containers and displays real-time metrics (CPU, memory, logs) in a terminal dashboard using tcell/tview.
 
-**Tech Stack**: Go 1.26+, Moby Docker client, tview/tcell terminal UI
+**Tech Stack**: Go 1.27+, Moby Docker client, tview/tcell terminal UI
 
 ## Codebase Structure
 
@@ -36,7 +36,7 @@ GoWatch monitors Docker containers and displays real-time metrics (CPU, memory, 
 - **internal/ui/components.go** - Reusable UI components
 - **internal/config/** - YAML configuration (`Config`, `Default()`, `Load()`, `Validate()`, `DefaultYAML()`)
 - **internal/trace/** - Trace store, log correlator (called on every log line by the collector), OTLP/HTTP JSON receiver (started by `main` when enabled) and an `Exporter` that nothing outside the tests calls
-- **internal/aws/** - AWS state manager and CloudWatch, Lambda, X-Ray and CloudFormation collectors: structure only, the collectors return fixed data and nothing calls them, and the AWS SDK is not a dependency
+- **internal/aws/** - AWS client built on `aws-sdk-go-v2`: `AWSClientManager` (`client.go`) resolves the settings when it is built (`settings.go`, no AWS call), classifies SDK errors into texts with hints (`errors.go`) and runs a poller goroutine that `main` starts (`poller.go`, `sdk.go`), which resolves the credentials, publishes the identity of the active credentials and lists the accounts of the SSO login (`accounts.go`), with its token handling in `sso.go`; `GetState()` returns a copy that shares nothing with the manager. CloudWatch Logs are not read yet
 - **pkg/metrics/** - Public metrics types
 
 ## Development Workflow
@@ -50,7 +50,7 @@ GoWatch monitors Docker containers and displays real-time metrics (CPU, memory, 
 
 ## Configuration and Startup Flow
 
-`main` runs in this order: flags -> `config.Load()` (exits with a message on stderr if the config is invalid) -> `ui.ResolveTheme()` (the `--theme` flag replaces `theme.name`; an unknown theme, role or color also exits with a message) -> `ui.BuildKeymap()` (an unknown preset, action or key, a key on two actions or `ctrl+c` exits with `gowatch: keybindings...`) -> Docker client -> `docker.Configure()` (log tail, history size, alert rules, AWS options) -> OTLP receiver if enabled -> `ui.NewDashboardWithOptions(ui.Options{Theme, Keymap, Layout})` + `ApplyInitialFilters()` -> ticker with `refresh_interval`.
+`main` runs in this order: flags -> `config.Load()` (exits with a message on stderr if the config is invalid) -> `ui.ResolveTheme()` (the `--theme` flag replaces `theme.name`; an unknown theme, role or color also exits with a message) -> `ui.BuildKeymap()` (an unknown preset, action or key, a key on two actions or `ctrl+c` exits with `gowatch: keybindings...`) -> Docker client -> `docker.Configure()` (log tail, history size, alert rules, AWS options) -> AWS poller `Start` (returns at once, does nothing unless AWS is enabled) -> OTLP receiver if enabled -> `ui.NewDashboardWithOptions(ui.Options{Theme, Keymap, Layout})` + `ApplyInitialFilters()` -> ticker with `refresh_interval`.
 
 When adding a user-tunable option:
 

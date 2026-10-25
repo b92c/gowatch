@@ -13,7 +13,7 @@
     "hasCI": true
   },
   "structure": {
-    "totalFiles": 29,
+    "totalFiles": 34,
     "topDirectories": [
       {
         "name": "cmd/gowatch",
@@ -29,9 +29,9 @@
       },
       {
         "name": "internal/ui",
-        "description": "Terminal UI using tcell/tview: dashboard, themes, panel layout, themed texts, configurable keybindings (keymap, input handling) and the interactive help page",
-        "fileCount": 8,
-        "files": ["dashboard.go", "components.go", "theme.go", "layout.go", "texts.go", "keymap.go", "input.go", "help.go"]
+        "description": "Terminal UI using tcell/tview: dashboard, themes, panel layout, themed texts, configurable keybindings (keymap, input handling), the interactive help page, the AWS view and the JSON log export",
+        "fileCount": 11,
+        "files": ["dashboard.go", "components.go", "theme.go", "layout.go", "texts.go", "keymap.go", "input.go", "help.go", "aws_view.go", "export.go", "export_action.go"]
       },
       {
         "name": "internal/config",
@@ -59,9 +59,9 @@
       },
       {
         "name": "internal/aws",
-        "description": "AWS structure only: client manager and the CloudWatch, Lambda, X-Ray and CloudFormation collectors. The collectors return fixed sample data and nothing outside the tests calls them; the AWS SDK is not a dependency",
-        "fileCount": 5,
-        "files": ["client.go", "cloudwatch.go", "lambda.go", "xray.go", "cloudformation.go"]
+        "description": "AWS client built on aws-sdk-go-v2: settings and enablement, error classification, state and manager, SSO token handling, and a poller that resolves the credentials, reads the identity of the active credentials and lists the accounts of its SSO login. CloudWatch Logs are not read yet",
+        "fileCount": 7,
+        "files": ["client.go", "settings.go", "errors.go", "sdk.go", "poller.go", "accounts.go", "sso.go"]
       },
       {
         "name": "pkg/metrics",
@@ -166,14 +166,14 @@
     {
       "name": "AWS Client Manager",
       "path": "internal/aws/client.go",
-      "description": "AWS connection state and options (AWS_* environment variables take priority over the config file); the CloudWatch, Lambda, X-Ray and CloudFormation collectors live in the same package, return fixed sample data and are not called outside the tests",
-      "exports": ["AWSClientManager", "NewAWSClientManager", "NewAWSClientManagerWithOptions", "Options", "AWSResource", "AWSState"],
+      "description": "AWS state and options (AWS_* environment variables take priority over the config file); the manager resolves its settings without any AWS call, a poller goroutine started by main resolves the credentials, reads the identity of the active credentials and lists the accounts of its SSO login, and GetState() returns a copy of the snapshot",
+      "exports": ["AWSClientManager", "NewAWSClientManager", "NewAWSClientManagerWithOptions", "Options", "AWSState", "Account", "Identity", "Conn", "Problem", "LineHook"],
       "dependencies": []
     },
     {
       "name": "Main",
       "path": "cmd/gowatch/main.go",
-      "description": "Application entry point - parses flags, loads the config, resolves the theme and the keymap, configures the collector, starts the optional OTLP receiver, creates the Docker client and runs the dashboard",
+      "description": "Application entry point - parses flags, loads the config, resolves the theme and the keymap, configures the collector, starts the AWS poller and the optional OTLP receiver, creates the Docker client and runs the dashboard",
       "exports": [],
       "dependencies": ["internal/aws", "internal/config", "internal/docker", "internal/trace", "internal/ui", "github.com/moby/moby/client"]
     }
@@ -211,7 +211,7 @@
     },
     {
       "step": 3,
-      "description": "main.go creates the Docker client via client.New(client.FromEnv) and calls docker.Configure() with the log tail, history size, alert rules and AWS options"
+      "description": "main.go creates the Docker client via client.New(client.FromEnv), calls docker.Configure() with the log tail, history size, alert rules and AWS options, and starts the AWS poller (it returns at once and does nothing unless AWS is enabled)"
     },
     {
       "step": 4,
@@ -227,7 +227,7 @@
     },
     {
       "step": 7,
-      "description": "The collector lists containers, fetches stats and logs for each, correlates traces from the log lines, evaluates the alert rules and reads the AWS state (its resource list is always empty today)"
+      "description": "The collector lists containers, fetches stats and logs for each, correlates traces from the log lines, evaluates the alert rules and copies the AWS state (the identity row, and the rows of the SSO login, once the AWS poller has connected)"
     },
     {
       "step": 8,

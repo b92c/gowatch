@@ -12,7 +12,7 @@ scaffoldVersion: "2.0.0"
 
 ## Prerequisites
 
-- Go 1.26+ installed
+- Go 1.27+ installed
 - Docker and Docker Compose
 - Access to Docker daemon socket (`/var/run/docker.sock`)
 
@@ -124,7 +124,7 @@ make check           # lint (same steps as the Lint job) and the tests
 make lint            # only the lint steps
 ```
 
-The `Lint` job runs the same make targets one by one (`fmt-check`, `vet`, `mod-check`, `field-check`, `go-sec`), so a failure there reproduces with the target of the same name. The tools are installed in `$(go env GOPATH)/bin`, which must be on your `PATH`. They have to be built with the Go version of the module (1.26): a tool built with an older Go cannot analyze it, so reinstall with `make install-tools` if you see type-checking errors.
+The `Lint` job runs the same make targets one by one (`fmt-check`, `vet`, `mod-check`, `field-check`, `go-sec`), so a failure there reproduces with the target of the same name. The tools are installed in `$(go env GOPATH)/bin`, which must be on your `PATH`. They have to be built with the Go version of the module (1.27): a tool built with an older Go cannot analyze it, so reinstall with `make install-tools` if you see type-checking errors.
 
 ### Release (`release.yml`)
 

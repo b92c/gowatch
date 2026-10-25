@@ -1,37 +1,90 @@
+// Package aws gives GoWatch a read-only view of an AWS account.
+//
+// An AWSClientManager resolves its settings (profile, region, endpoint and
+// whether AWS is configured at all) when it is built, from environment
+// variables and file metadata only. Everything that talks to AWS runs later, on
+// one poller goroutine that main starts: it loads the SDK configuration, asks
+// who the credentials belong to, lists the accounts of the SSO login of the
+// profile, gets credentials for the accounts that aws.accounts asks to monitor,
+// and publishes a snapshot of what it found. The dashboard reads that snapshot
+// through GetState, which never waits for AWS.
+//
+// The package does not import internal/docker, internal/ui or internal/filter.
 package aws
 
 import (
-	"net/http"
-	"os"
+	"context"
+	"slices"
 	"sync"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/config"
 )
 
-type AWSResource struct {
-	Metrics     map[string]float64 `json:"metrics,omitempty"`
-	LastUpdated time.Time          `json:"last_updated"`
-	ID          string             `json:"id"`
-	Type        string             `json:"type"`
-	Name        string             `json:"name"`
-	Region      string             `json:"region"`
-	Status      string             `json:"status"`
+// Statuses of an account row. The dashboard colors them by their text.
+const (
+	StatusMonitored        = "monitored"
+	StatusAvailable        = "available"
+	StatusRequiresSSO      = "requires SSO"
+	StatusFollowing        = "following"
+	StatusFollowingLagging = "following (lagging)"
+	StatusNotFollowedCap   = "not followed (cap)"
+	StatusNotFollowed      = "-"
+)
+
+// Conn is the state of the connection to AWS, as the title of the AWS view
+// shows it.
+type Conn string
+
+// The connection states.
+const (
+	ConnNotConfigured Conn = "not configured"
+	ConnDisabled      Conn = "disabled"
+	ConnConnecting    Conn = "connecting"
+	ConnConnected     Conn = "connected"
+	ConnError         Conn = "error"
+)
+
+// Identity is who the active credentials belong to, as sts:GetCallerIdentity
+// reports it.
+type Identity struct{ AccountID, ARN, UserID string }
+
+// Account is one row of the AWS view.
+type Account struct {
+	UpdatedAt time.Time // time of the discovery that produced the row
+	ID        string
+	Name      string // never empty: the SSO name when known, otherwise the ID
+	Role      string // role used to monitor the account through SSO; empty for the identity account
+	Status    string
+	Roles     []string // roles the SSO login can use in the account
+	Identity  bool     // the account of the active credentials
 }
 
+// AWSState is a snapshot of what the manager knows. GetState returns a copy
+// that shares nothing with the manager.
 type AWSState struct {
-	Region      string        `json:"region"`
-	EndpointURL string        `json:"endpoint_url,omitempty"`
-	LastError   string        `json:"last_error,omitempty"`
-	Resources   []AWSResource `json:"resources"`
-	Enabled     bool          `json:"enabled"`
-	Connected   bool          `json:"connected"`
+	UpdatedAt      time.Time
+	Identity       Identity
+	LastError      Problem // connection problem: config, credentials or identity
+	DiscoveryError Problem // SSO discovery problem; the identity can still be connected
+	Region         string  // provisional until the SDK resolves it
+	Profile        string
+	EndpointURL    string
+	EnabledReason  string
+	Conn           Conn
+	Accounts       []Account
+	Enabled        bool
+	Connected      bool
 }
 
-type AWSClientManager struct {
-	httpClient  *http.Client
-	region      string
-	endpointURL string
-	state       AWSState
-	mu          sync.RWMutex
+// clone returns a copy of s that shares no slice with it, the roles of each
+// account included.
+func (s AWSState) clone() AWSState {
+	s.Accounts = slices.Clone(s.Accounts)
+	for i := range s.Accounts {
+		s.Accounts[i].Roles = slices.Clone(s.Accounts[i].Roles)
+	}
+	return s
 }
 
 // Options carries the AWS settings that come from the config file. The zero
@@ -42,88 +95,121 @@ type Options struct {
 	Enabled     *bool
 	Region      string
 	EndpointURL string
+	// Profile is the shared config profile; AWS_PROFILE takes priority.
+	Profile string
+	// Accounts lists the extra accounts to monitor through SSO, each as
+	// "<account id>" or "<account id>/<role name>". The config validated the
+	// shape of every entry.
+	Accounts []string
+	// RefreshInterval is how often the poller makes a pass. Zero or less means
+	// DefaultRefreshInterval.
+	RefreshInterval time.Duration
+	// DiscoveryInterval is how often a pass reloads the shared files and asks
+	// AWS who the credentials belong to. Zero or less means
+	// DefaultDiscoveryInterval.
+	DiscoveryInterval time.Duration
 }
 
-// NewAWSClientManager builds a manager from the AWS_* environment variables only.
+// The built-in intervals, used when Options leaves them at zero.
+const (
+	DefaultRefreshInterval   = 15 * time.Second
+	DefaultDiscoveryInterval = 60 * time.Second
+)
+
+// IsZero reports whether o changes nothing: it forces no enablement and sets no
+// value. docker.Configure keeps the current manager for a zero Options.
+func (o Options) IsZero() bool {
+	return o.Enabled == nil && o.Region == "" && o.EndpointURL == "" && o.Profile == "" &&
+		len(o.Accounts) == 0 && o.RefreshInterval == 0 && o.DiscoveryInterval == 0
+}
+
+// AWSClientManager holds the resolved AWS settings and the latest snapshot of
+// the AWS state. It is safe for concurrent use.
+//
+// The poller goroutine does every AWS call; the mutex guards the snapshot, the
+// started flag and the poller's handles, and is never held during a call.
+type AWSClientManager struct {
+	svc         services
+	loadConfig  configLoader
+	now         func() time.Time
+	onLine      LineHook
+	cancel      context.CancelFunc
+	done        chan struct{}
+	work        work
+	state       AWSState
+	settings    settings
+	callTimeout time.Duration
+	mu          sync.RWMutex
+	started     bool
+}
+
+// NewAWSClientManager builds a manager from the environment and the shared AWS
+// files only.
 func NewAWSClientManager() *AWSClientManager {
 	return NewAWSClientManagerWithOptions(Options{})
 }
 
-// NewAWSClientManagerWithOptions builds a manager from the environment and o.
-// AWS_* environment variables take priority over the corresponding options:
-// region is AWS_REGION, then AWS_DEFAULT_REGION, then o.Region, then
-// us-east-1; the endpoint is AWS_ENDPOINT_URL, then o.EndpointURL. An explicit
-// o.Enabled always wins; otherwise the integration is enabled when
-// credentials, a profile, a region or an endpoint are configured.
+// NewAWSClientManagerWithOptions builds a manager from the environment and o,
+// with the precedence rules of resolveSettings. It makes no AWS call and reads
+// nothing but environment variables and the metadata of the two shared files.
+// The initial state says whether AWS is not configured, disabled or about to
+// connect.
 func NewAWSClientManagerWithOptions(o Options) *AWSClientManager {
-	region := os.Getenv("AWS_REGION")
-	if region == "" {
-		region = os.Getenv("AWS_DEFAULT_REGION")
-	}
-	if region == "" {
-		region = o.Region
-	}
-	if region == "" {
-		region = "us-east-1"
-	}
+	s := resolveSettings(o)
 
-	endpointURL := os.Getenv("AWS_ENDPOINT_URL")
-	if endpointURL == "" {
-		endpointURL = o.EndpointURL
-	}
-
-	enabled := os.Getenv("AWS_ACCESS_KEY_ID") != "" || os.Getenv("AWS_PROFILE") != "" || endpointURL != "" || os.Getenv("AWS_REGION") != "" || o.Region != ""
-	if o.Enabled != nil {
-		enabled = *o.Enabled
+	conn := ConnConnecting
+	switch {
+	case s.mode == modeOff:
+		conn = ConnDisabled
+	case !s.enabled:
+		conn = ConnNotConfigured
 	}
 
 	return &AWSClientManager{
-		region:      region,
-		endpointURL: endpointURL,
-		httpClient:  &http.Client{Timeout: 10 * time.Second},
+		settings: s,
 		state: AWSState{
-			Enabled:     enabled,
-			Region:      region,
-			EndpointURL: endpointURL,
-			Resources:   make([]AWSResource, 0),
+			Region:        s.region,
+			Profile:       s.profile,
+			EndpointURL:   s.endpointURL,
+			EnabledReason: s.enabledReason,
+			Conn:          conn,
+			Enabled:       s.enabled,
 		},
+		work:        work{conn: conn},
+		svc:         sdkServices{},
+		loadConfig:  config.LoadDefaultConfig,
+		now:         time.Now,
+		callTimeout: defaultCallTimeout,
 	}
 }
 
+// GetState returns a copy of the current snapshot. It never waits for an AWS
+// call.
 func (m *AWSClientManager) GetState() AWSState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
-	resCopy := make([]AWSResource, len(m.state.Resources))
-	copy(resCopy, m.state.Resources)
-	st := m.state
-	st.Resources = resCopy
-	return st
+	return m.state.clone()
 }
 
-func (m *AWSClientManager) SetConnected(connected bool, errStr string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.state.Connected = connected
-	m.state.LastError = errStr
-}
-
-func (m *AWSClientManager) SetResources(resources []AWSResource) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.state.Resources = resources
-	m.state.Connected = true
-	m.state.LastError = ""
-}
-
+// Region is the region of the current snapshot: the provisional one until the
+// SDK has resolved the configuration.
 func (m *AWSClientManager) Region() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.region
+	return m.state.Region
 }
 
+// EndpointURL is the endpoint override of the current snapshot, if any.
 func (m *AWSClientManager) EndpointURL() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.endpointURL
+	return m.state.EndpointURL
+}
+
+// publishState replaces the snapshot with a copy of st.
+func (m *AWSClientManager) publishState(st AWSState) {
+	st = st.clone()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.state = st
 }

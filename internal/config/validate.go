@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -19,6 +20,11 @@ const (
 	minHistoryPoints   = 10
 	maxHistoryPoints   = 3600
 	maxLayoutHeight    = 100
+
+	minAWSRefreshInterval   = 5 * time.Second
+	maxAWSRefreshInterval   = 10 * time.Minute
+	minAWSDiscoveryInterval = 15 * time.Second
+	maxAWSDiscoveryInterval = time.Hour
 )
 
 // Accepted spellings of aws.enabled.
@@ -27,6 +33,10 @@ const (
 	awsEnabledTrue  = "true"
 	awsEnabledFalse = "false"
 )
+
+// awsAccountEntry is the shape of an aws.accounts entry: a 12-digit account ID,
+// optionally followed by "/" and the name of an IAM role.
+var awsAccountEntry = regexp.MustCompile(`^\d{12}(/[\w+=,.@-]+)?$`)
 
 // Validate checks every value and reports all problems at once.
 func (c *Config) Validate() error {
@@ -47,10 +57,35 @@ func (c *Config) Validate() error {
 	if !validAWSEnabled(c.AWS.Enabled) {
 		errs = append(errs, fmt.Errorf("aws.enabled must be auto, true or false, got %q", c.AWS.Enabled))
 	}
+	errs = append(errs, c.AWS.validate()...)
 	errs = append(errs, c.Alerts.validate()...)
 	errs = append(errs, c.Layout.validate()...)
 
 	return errors.Join(errs...)
+}
+
+// validate checks the AWS intervals and the account entries. Zero means "not
+// set" and keeps the built-in value, so only non-zero intervals are checked.
+func (a AWSConfig) validate() []error {
+	var errs []error
+	for _, interval := range []struct {
+		name     string
+		value    time.Duration
+		min, max time.Duration
+	}{
+		{name: "aws.refresh_interval", value: a.RefreshInterval, min: minAWSRefreshInterval, max: maxAWSRefreshInterval},
+		{name: "aws.discovery_interval", value: a.DiscoveryInterval, min: minAWSDiscoveryInterval, max: maxAWSDiscoveryInterval},
+	} {
+		if interval.value != 0 && (interval.value < interval.min || interval.value > interval.max) {
+			errs = append(errs, fmt.Errorf("%s must be between %s and %s, got %s", interval.name, interval.min, interval.max, interval.value))
+		}
+	}
+	for i, entry := range a.Accounts {
+		if !awsAccountEntry.MatchString(entry) {
+			errs = append(errs, fmt.Errorf("aws.accounts[%d] must be \"<12-digit account id>\" or \"<12-digit account id>/<role name>\", got %q", i, entry))
+		}
+	}
+	return errs
 }
 
 // validate checks the panel heights. They are relative weights: 0 means "not

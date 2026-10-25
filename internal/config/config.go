@@ -27,13 +27,13 @@ const DefaultThemeName = "dark"
 
 // Config is the complete GoWatch configuration.
 type Config struct {
-	Layout          LayoutConfig      `yaml:"layout"`
-	Filters         FiltersConfig     `yaml:"filters"`
-	AWS             AWSConfig         `yaml:"aws"`
 	Keybindings     KeybindingsConfig `yaml:"keybindings"`
 	Theme           ThemeConfig       `yaml:"theme"`
 	Alerts          AlertsConfig      `yaml:"alerts"`
+	Filters         FiltersConfig     `yaml:"filters"`
+	Layout          LayoutConfig      `yaml:"layout"`
 	Tracing         TracingConfig     `yaml:"tracing"`
+	AWS             AWSConfig         `yaml:"aws"`
 	Logs            LogsConfig        `yaml:"logs"`
 	History         HistoryConfig     `yaml:"history"`
 	RefreshInterval time.Duration     `yaml:"refresh_interval"`
@@ -69,11 +69,17 @@ type OTLPReceiverConfig struct {
 
 // AWSConfig holds the AWS integration settings. Enabled is one of "auto",
 // "true" or "false"; AWS_* environment variables take priority over the other
-// fields.
+// fields. A zero RefreshInterval or DiscoveryInterval means the built-in value
+// (15s and 60s). Accounts lists the extra accounts to monitor through SSO, each
+// as "<account id>" or "<account id>/<role name>".
 type AWSConfig struct {
-	Region      string `yaml:"region"`
-	EndpointURL string `yaml:"endpoint_url"`
-	Enabled     string `yaml:"enabled"`
+	Region            string        `yaml:"region"`
+	EndpointURL       string        `yaml:"endpoint_url"`
+	Enabled           string        `yaml:"enabled"`
+	Profile           string        `yaml:"profile"`
+	Accounts          []string      `yaml:"accounts"`
+	RefreshInterval   time.Duration `yaml:"refresh_interval"`
+	DiscoveryInterval time.Duration `yaml:"discovery_interval"`
 }
 
 // ThemeConfig is the raw theme section. It is decoded here but interpreted by

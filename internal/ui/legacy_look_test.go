@@ -428,9 +428,9 @@ func TestDarkThemeTableColorsMatchTheOriginal(t *testing.T) {
 		d.awsViewMode = true
 		containers := sampleContainers()
 		containers.AWS.Region = "us-east-1"
-		containers.AWS.Resources = []aws.AWSResource{
-			{Name: "fn", Type: "Lambda", Region: "us-east-1", Status: "Active", LastUpdated: time.Unix(0, 0)},
-			{Name: "stack", Type: "CloudFormation", Region: "us-east-1", Status: "UPDATE_IN_PROGRESS", LastUpdated: time.Unix(0, 0)},
+		containers.AWS.Accounts = []aws.Account{
+			{ID: "123456789012", Name: "dev", Status: aws.StatusMonitored, Identity: true, UpdatedAt: time.Unix(0, 0)},
+			{ID: "210987654321", Name: "prod", Status: aws.StatusAvailable, UpdatedAt: time.Unix(0, 0)},
 		}
 
 		d.Update(containers)

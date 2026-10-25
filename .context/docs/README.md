@@ -7,6 +7,7 @@ Welcome to the GoWatch repository knowledge base. Start with the project overvie
 - [Development Workflow](./development-workflow.md) - Branching, make commands, Docker setup
 - [Testing Strategy](./testing-strategy.md) - Go testing patterns and coverage
 - [Tooling & Productivity Guide](./tooling.md) - Go tools, IDE config, dependencies
+- [AWS Integration Design](./aws-integration-design.md) - Phase 4 first delivery: goals, constraints, decisions and stage gates for accounts and CloudWatch Logs
 
 ## Repository Snapshot
 - `cmd/gowatch/` — Application entry point (main.go)
@@ -14,7 +15,7 @@ Welcome to the GoWatch repository knowledge base. Start with the project overvie
 - `internal/ui/` — Terminal dashboard using tcell/tview: themes, panel layout, configurable keybindings and the help page
 - `internal/config/` — YAML configuration loading, validation and the example file
 - `internal/trace/` — Trace store, log correlator and OTLP/HTTP JSON receiver (the exporter is not wired)
-- `internal/aws/` — AWS structure only (collectors return fixed data and are not called; integration planned)
+- `internal/aws/` — AWS client built on the AWS SDK for Go v2: settings, error classification and a poller that shows the identity of the active credentials and the accounts of its SSO login (CloudWatch Logs are not read yet)
 - `pkg/metrics/` — Public metrics types
 - `docker-compose.yaml` — Docker development environment
 - `makefile` — Build and development commands
@@ -27,6 +28,7 @@ Welcome to the GoWatch repository knowledge base. Start with the project overvie
 | Development Workflow | `development-workflow.md` | makefile, Docker setup, branching rules |
 | Testing Strategy | `testing-strategy.md` | Go test patterns, coverage commands |
 | Tooling & Productivity Guide | `tooling.md` | Go tools, IDE configs, dependencies |
+| AWS Integration Design | `aws-integration-design.md` | README, internal/aws, project roadmap, AWS SDK for Go v2 behavior |
 
 ## Quick Reference
 
@@ -40,7 +42,7 @@ make docker-build # Build Docker image
 ```
 
 ### Tech Stack
-- **Language**: Go 1.26+
+- **Language**: Go 1.27+
 - **Docker Client**: Moby (github.com/moby/moby)
 - **Terminal UI**: tview + tcell
 - **Observability**: OpenTelemetry (planned)

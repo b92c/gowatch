@@ -39,7 +39,7 @@ Status checked against the code in October 2026. Legend:
 - Phase 1 🟡: P1.2 and P1.4 are done; P1.1 and P1.3 have gaps (no min/max/average display, no status or label filter while running).
 - Phase 2 ✅: done, except the Emacs keybinding mode.
 - Phase 3 🟡: P3.1 is done; traces from log lines and from the optional OTLP receiver show in the System Resources panel. There is no flamegraph, no log-to-span link and nothing calls the exporter.
-- Phase 4 🟡 (structure only): the AWS code returns fixed data and nothing calls it, so the AWS view is always empty.
+- Phase 4 🟡: foundation: AWS SDK client, enablement, identity, SSO-linked accounts and `aws.accounts`; CloudWatch Logs pending. The AWS view shows the identity of the active credentials and the accounts of the SSO login; P4.1-P4.4 have not started.
 - Phase 5 🟡: P5.1 works in part (CPU, memory, OOM and restarting containers) and the alerts list works; P5.2 has not started; P5.3 cannot acknowledge alerts or show statistics.
 - Phases 6 and 7 ⚪: not started.
 
@@ -131,40 +131,40 @@ Status: only placeholder code exists. `trace.Exporter` posts a trace to a URL as
 
 ---
 
-## Phase 4: AWS Serverless Integration (Q1-Q2 2027) 🟡 (structure only)
+## Phase 4: AWS Serverless Integration (Q1-Q2 2027) 🟡 (foundation in progress)
 
-Only the structure exists, and none of it is connected to a data source:
+Foundation: AWS SDK client, enablement, identity, SSO-linked accounts and `aws.accounts`; CloudWatch Logs pending.
 
-- `internal/aws` has a state manager (`AWSClientManager`) and four collectors (CloudWatch, Lambda, X-Ray, CloudFormation). The collectors return fixed sample data, for example the Lambda functions `gowatch-auth-handler` and `gowatch-api-processor`.
-- Nothing outside the tests calls the collectors, `SetResources` or `SetConnected`, and `aws-sdk-go-v2` is not in `go.mod`, so GoWatch makes no AWS calls.
-- The AWS view (`a`) builds its table from the resources in that state, which is never filled, so the table is always empty (the region shows in its title).
-- The `aws.*` settings and the `AWS_*` variables only set the `Enabled`, `Region` and `EndpointURL` fields of that state. The UI reads only `Region`.
+- `internal/aws` is a client built on `aws-sdk-go-v2`. `AWSClientManager` resolves the profile, region, endpoint and whether AWS is configured (`aws.enabled`: `auto`, `true` or `false`) when it is built, without any AWS call. A poller goroutine that `main` starts loads the SDK configuration, resolves the credentials and calls `sts:GetCallerIdentity`, and publishes a snapshot that the dashboard reads. When the profile has an SSO login (an `sso_session` or a legacy profile), the same discovery pass lists the accounts and roles of the login with its token (`sso:ListAccounts` and `sso:ListAccountRoles`, at most 100 accounts and 20 roles each) and gets credentials (`sso:GetRoleCredentials`) for the accounts named in `aws.accounts`. SDK errors are classified into short texts with hints (no credentials, expired SSO token, expired or invalid keys, access denied, throttling, unreachable).
+- The AWS view (`a`) shows the connection status in its title, with the SSO discovery problem after it when there is one, and an `Account` row for the account of the active credentials followed by one row per account of the SSO login (`monitored`, `available`, or the status of the `aws.accounts` entry); with no row, a single row explains why (not configured, disabled, connecting, or the problem).
+- The `aws.*` settings are `enabled`, `region`, `endpoint_url`, `profile`, `refresh_interval`, `discovery_interval` and `accounts`. `aws.profile` and `aws.accounts` are accepted from `./gowatch.yaml`; `aws.endpoint_url` is not.
+- Pending: CloudWatch Logs in the logs panel (P4.1), and the collectors of P4.2-P4.4. The placeholder collectors for CloudWatch, Lambda, X-Ray and CloudFormation were removed.
 
 **P4.1 - CloudWatch Logs Integration** ⚪
 - CloudWatch Log Groups monitoring
 - Aggregated log streaming with Docker logs
 
-Status: only placeholder code exists. `CloudWatchCollector` returns fixed `Invocations`, `Errors` and `DurationAvg` values for any group name. No log group is read and nothing is streamed into the logs panel.
+Status: not started. No log group is read and nothing is streamed into the logs panel.
 
 **P4.2 - Lambda Monitoring** ⚪
 - Display Lambda metrics (invocations, duration, errors)
 - Lambda logs from CloudWatch
 
-Status: only placeholder code exists. `LambdaCollector.ListFunctions` returns two fixed functions. No metrics or logs are fetched.
+Status: not started. No Lambda metrics or logs are fetched.
 
 **P4.3 - XRay Integration** ⚪
 - Distributed trace fetching
 - Service map display
 - Trace correlation
 
-Status: only placeholder code exists. `XRayCollector.FetchServiceGraph` returns one fixed service (`api-gateway`). No trace is fetched, and there is no service map and no correlation.
+Status: not started. No trace is fetched, and there is no service map and no correlation.
 
 **P4.4 - CloudFormation Monitoring** ⚪
 - Stack status monitoring
 - Resource tracking
 - Event timeline
 
-Status: only placeholder code exists. `CloudFormationCollector.ListStacks` returns one fixed stack (`gowatch-dev-stack`). There is no stack status monitoring, resource tracking or event timeline.
+Status: not started. There is no stack status monitoring, resource tracking or event timeline.
 
 ---
 
@@ -251,9 +251,8 @@ Original plan, kept as written:
 Where things stand (October 2026). This list is status only and does not change the plan above; the quarters in the phase titles and the months above are those of the original plan and have not been revised.
 
 - **Done**: Phase 2 (except the Emacs mode), P1.2, P1.4 and P3.1.
-- **Partly done**: P1.1 and P1.3 (Phase 1), P3.2 (Phase 3), P5.1 and P5.3 (Phase 5). What is missing is listed under each item.
-- **Structure only**: Phase 4. The AWS view, its state and the `aws` settings exist, but P4.1-P4.4 have only placeholder code (collectors that return fixed data and are not called), so no real AWS data is read yet.
-- **Not started**: P3.3 (only placeholder code exists: the exporter is not called), P5.2, Phase 6 and Phase 7.
+- **Partly done**: P1.1 and P1.3 (Phase 1), P3.2 (Phase 3), the Phase 4 foundation (AWS SDK client, enablement, identity, SSO-linked accounts and `aws.accounts`; CloudWatch Logs pending), P5.1 and P5.3 (Phase 5). What is missing is listed under each item.
+- **Not started**: P3.3 (only placeholder code exists: the exporter is not called), P4.1-P4.4 (CloudWatch Logs, Lambda, X-Ray and CloudFormation), P5.2, Phase 6 and Phase 7.
 
 ---
 
@@ -267,7 +266,7 @@ Where things stand (October 2026). This list is status only and does not change 
 | P5 | notify-go | Notifications |
 | P6.4 | prometheus/client_golang | Metrics |
 
-None of these libraries is a direct dependency yet. The sparklines are drawn by `ui.RenderSparkline`, the OTLP receiver is written in the repository, and `go.opentelemetry.io/otel` is only an indirect dependency in `go.mod`.
+`aws-sdk-go-v2` is now a direct dependency (the core module, `config`, `credentials`, `feature/ec2/imds` and `service/sts`, plus `smithy-go`). None of the other libraries is a direct dependency yet. The sparklines are drawn by `ui.RenderSparkline`, the OTLP receiver is written in the repository, and `go.opentelemetry.io/otel` is only an indirect dependency in `go.mod`.
 
 ---
 

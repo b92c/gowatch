@@ -5,6 +5,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,6 +46,32 @@ func saveSettings(t *testing.T) {
 		globalAlertEngine.Evaluate(nil, metrics.HostInfo{})
 		globalAlertEngine.ClearResolvedAlerts()
 	})
+}
+
+// isolateAWSEnv keeps the host's AWS setup out of a test: every AWS_* variable
+// is blanked, HOME points to a new temporary directory and the two shared file
+// variables name files in it that do not exist. It is the helper of the same
+// name in internal/aws, repeated here because test helpers do not cross
+// packages. Every test that builds an AWS manager, directly or through
+// Configure, calls it first.
+func isolateAWSEnv(t *testing.T) {
+	t.Helper()
+	for _, entry := range os.Environ() {
+		if name, _, _ := strings.Cut(entry, "="); strings.HasPrefix(name, "AWS_") {
+			t.Setenv(name, "")
+		}
+	}
+	for _, name := range []string{
+		"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION",
+		"AWS_ENDPOINT_URL", "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+		"AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_EC2_METADATA_DISABLED",
+	} {
+		t.Setenv(name, "")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("AWS_CONFIG_FILE", filepath.Join(home, ".aws", "config"))
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(home, ".aws", "credentials"))
 }
 
 // forgetContainer drops the per-container state the collector keeps in
@@ -255,15 +283,17 @@ func TestConfigureAlertRules(t *testing.T) {
 }
 
 func TestConfigureAWS(t *testing.T) {
-	for _, key := range []string{"AWS_REGION", "AWS_DEFAULT_REGION", "AWS_ENDPOINT_URL", "AWS_ACCESS_KEY_ID", "AWS_PROFILE"} {
-		t.Setenv(key, "")
-	}
+	isolateAWSEnv(t)
 	saveSettings(t)
 
 	before := GetGlobalAWSManager()
 	Configure(Options{})
 	if GetGlobalAWSManager() != before {
 		t.Error("zero aws.Options must keep the existing AWS manager")
+	}
+	Configure(Options{AWS: aws.Options{Accounts: []string{}}})
+	if GetGlobalAWSManager() != before {
+		t.Error("aws.Options with an empty account list must keep the existing AWS manager")
 	}
 
 	Configure(Options{AWS: aws.Options{Region: "ap-south-1", EndpointURL: "http://localhost:4566"}})
@@ -274,12 +304,29 @@ func TestConfigureAWS(t *testing.T) {
 	if mgr.Region() != "ap-south-1" || mgr.EndpointURL() != "http://localhost:4566" || !mgr.GetState().Enabled {
 		t.Errorf("manager = region %q endpoint %q state %+v", mgr.Region(), mgr.EndpointURL(), mgr.GetState())
 	}
+
+	// A profile alone is a non-zero option too: it replaces the manager.
+	Configure(Options{AWS: aws.Options{Profile: "dev"}})
+	profiled := GetGlobalAWSManager()
+	if profiled == mgr {
+		t.Fatal("aws.Options with only a profile must replace the AWS manager")
+	}
+	if got := profiled.GetState().Profile; got != "dev" {
+		t.Errorf("manager profile = %q, want dev", got)
+	}
+
+	// So are the accounts alone.
+	Configure(Options{AWS: aws.Options{Accounts: []string{"123456789012"}}})
+	if GetGlobalAWSManager() == profiled {
+		t.Fatal("aws.Options with only accounts must replace the AWS manager")
+	}
 }
 
 // Configure is meant to run once before collection starts, but the settings it
 // touches are read from the collector goroutine; run with -race to catch any
 // unsynchronized access.
 func TestConfigureIsSafeAlongsideCollection(t *testing.T) {
+	isolateAWSEnv(t)
 	saveSettings(t)
 
 	var wg sync.WaitGroup

@@ -12,7 +12,9 @@ import (
 // AWS calls or to start the trace receiver, possibly on a network address set
 // in another layer. They are still accepted from ~/.gowatch/config.yaml and
 // from --config. An explicit tracing.otlp_receiver.enabled: false is harmless
-// and stays allowed.
+// and stays allowed. aws.profile and aws.accounts are honored from every layer:
+// they only choose among the user's own credentials and the accounts of their
+// own SSO login, and cannot redirect traffic or expose anything.
 func (c *Config) untrustedSettings(path string) error {
 	const advice = "move it to ~/.gowatch/config.yaml or pass the file with --config"
 

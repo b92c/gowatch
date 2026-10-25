@@ -23,10 +23,10 @@ gowatch/
 ├── cmd/gowatch/          # Application entry point (main.go)
 ├── internal/
 │   ├── docker/           # Docker daemon interaction (collector.go, parser.go)
-│   ├── ui/               # Terminal UI: dashboard.go, components.go, theme.go (themes), layout.go (panel grid), texts.go (themed texts), keymap.go (keys and presets), input.go (key handling), help.go (help page)
+│   ├── ui/               # Terminal UI: dashboard.go, components.go, theme.go (themes), layout.go (panel grid), texts.go (themed texts), keymap.go (keys and presets), input.go (key handling), help.go (help page), aws_view.go (AWS table)
 │   ├── config/           # YAML configuration: config.go (types, Default), load.go, validate.go, untrusted.go, alerts.go, defaultyaml.go
 │   ├── trace/            # Distributed tracing: types.go (trace store), correlator.go (log correlator), exporter.go (OTLP receiver, exporter)
-│   └── aws/              # AWS structure only, no AWS calls yet (client.go, cloudwatch.go, lambda.go, xray.go, cloudformation.go)
+│   └── aws/              # AWS client: client.go (manager and state), settings.go, errors.go, sdk.go, poller.go, accounts.go, sso.go
 ├── pkg/metrics/          # Metrics types (types.go)
 ├── docker-compose.yaml   # Docker development environment
 └── makefile              # Build and development commands
@@ -43,13 +43,14 @@ gowatch/
 - **Layout** (`internal/ui/layout.go`): `planGrid()`/`buildGrid()` build the main grid from the layout config: services, resources, the 3-row search field, logs and the 1-row help bar. Heights are proportional weights; resources, logs and the help bar can be hidden and then leave the grid. The focus returns to the logs, or to the services table when the logs are hidden.
 - **Configuration** (`internal/config/`): Loads the optional YAML config (`~/.gowatch/config.yaml`, then `./gowatch.yaml`, or a single `--config` file) on top of `Default()`, decodes strictly (unknown keys are errors) and validates it. The `theme` and `keybindings` sections are decoded here as raw data and checked by `ui.ResolveTheme` and `ui.BuildKeymap`; the layout heights are checked by `Validate()`. With no file it returns exactly the built-in defaults, so GoWatch stays zero-config. It is a leaf package: it may import only the standard library, the YAML decoder, `internal/alert` and `pkg/metrics`, never `internal/docker`, `internal/ui` or `internal/filter`.
 - **Tracing** (`internal/trace/`): An in-memory trace store (up to 500 traces; a trace older than 5 minutes is dropped when the next span arrives), a correlator that reads trace context from the Docker log lines on every refresh, and an OTLP/HTTP JSON receiver that `main` starts when `tracing.otlp_receiver.enabled` is true. The traces show in the System Resources panel (count, error count and the two most recent). The `Exporter` type exists, but nothing outside the tests calls it; there is no flamegraph and no log-to-span link.
-- **AWS Integration** (`internal/aws/`): Structure only. It holds a state manager and CloudWatch, Lambda, X-Ray and CloudFormation collectors that return fixed sample data; nothing outside the tests calls them and the AWS SDK is not a dependency, so GoWatch makes no AWS calls. The AWS view (`a`) builds its table from the state's resources, which are never filled, so it is always empty.
+- **AWS Integration** (`internal/aws/`): A read-only client built on the AWS SDK for Go v2. `AWSClientManager` resolves the profile, region, endpoint and whether AWS is configured when it is built, from the environment and the metadata of the shared files only. A poller goroutine that `main` starts does every AWS call, each with a 10 second timeout: it loads the SDK configuration, resolves the credentials and calls `sts:GetCallerIdentity` and, for a profile with an SSO login, lists the accounts and roles of the login and gets credentials for the accounts named in `aws.accounts`, then publishes a snapshot that `GetState()` returns as a copy. SDK errors become short texts with hints. The AWS view (`a`) shows the status in its title and a row for the account of the active credentials followed by one row per account of the SSO login, or one row that explains why there is none. CloudWatch Logs are not read yet.
 
 ## Tech Stack
 
-- **Language**: Go 1.26+
+- **Language**: Go 1.27+
 - **Docker Client**: Moby (`github.com/moby/moby`) - direct Docker daemon API via Unix socket
 - **Terminal UI**: tcell v2 (low-level) + tview (high-level widgets)
+- **AWS**: AWS SDK for Go v2 (`github.com/aws/aws-sdk-go-v2`, a direct dependency: `config`, `credentials`, `feature/ec2/imds`, `service/sso`, `service/ssooidc`, `service/sts`); read-only, the identity of the active credentials and the accounts of the SSO login for now
 - **Observability**: OpenTelemetry (planned: the OTLP receiver is written in the repository and the OpenTelemetry SDK is only an indirect dependency)
 - **Configuration**: YAML via `go.yaml.in/yaml/v3`
 - **Build System**: makefile (install, build, run, test, docker-build, go-sec, field-fix)
@@ -60,7 +61,7 @@ gowatch/
 1. `main.go` parses the flags (`--config`, `--theme`, `--print-default-config`) and calls `config.Load()`; a config error is printed to stderr and the process exits before the TUI opens
 2. `main.go` resolves the theme with `ui.ResolveTheme()` (the `--theme` flag replaces `theme.name`); an unknown theme, role or color is a startup error too
 3. `main.go` builds the keymap with `ui.BuildKeymap()`; an unknown preset, action or key, a clash between actions or `ctrl+c` is a startup error (`gowatch: keybindings...` on stderr)
-4. `main.go` creates Docker client via `client.New(client.FromEnv)` and calls `docker.Configure()` with the log tail, history size, alert rules and AWS options from the config
+4. `main.go` creates Docker client via `client.New(client.FromEnv)` and calls `docker.Configure()` with the log tail, history size, alert rules and AWS options from the config; it then starts the AWS poller, which returns at once and does nothing unless AWS is enabled, and stops it on exit
 5. If `tracing.otlp_receiver.enabled` is set, `main.go` starts the OTLP receiver on `docker.GetGlobalTraceStore()` (a bind failure is fatal) and stops it on exit
 6. `main.go` creates the dashboard with `ui.NewDashboardWithOptions()` (theme, keymap and layout) and applies the initial filters with `Dashboard.ApplyInitialFilters()`
 7. Goroutine ticker (`refresh_interval`, 2s by default) calls `docker.WatchContainers()`

@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/b92c/gowatch/internal/alert"
 	"github.com/b92c/gowatch/pkg/metrics"
@@ -72,6 +73,18 @@ func TestDefaultYAML(t *testing.T) {
 		if cfg.Keybindings.Preset != "default" || len(cfg.Keybindings.Bindings) != 0 {
 			t.Errorf("keybindings from DefaultYAML = %+v, want the default preset and no bindings", cfg.Keybindings)
 		}
+
+		// The aws section spells out the built-in AWS values, which Default()
+		// leaves at zero.
+		if cfg.AWS.Profile != "" || cfg.AWS.RefreshInterval != 15*time.Second || cfg.AWS.DiscoveryInterval != 60*time.Second {
+			t.Errorf("aws from DefaultYAML = %+v, want no profile, refresh 15s and discovery 60s", cfg.AWS)
+		}
+		cfg.AWS.RefreshInterval, cfg.AWS.DiscoveryInterval = 0, 0
+		// "accounts: []" loads as an empty list, where Default() has none.
+		if len(cfg.AWS.Accounts) != 0 {
+			t.Errorf("aws.accounts from DefaultYAML = %q, want an empty list", cfg.AWS.Accounts)
+		}
+		cfg.AWS.Accounts = nil
 
 		// Normalize the spellings that legitimately differ from Default().
 		cfg.Alerts.RuleOverrides = nil
