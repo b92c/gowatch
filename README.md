@@ -1,3 +1,5 @@
+
+
 # GoWatch
 
 GoWatch is a lightweight, real-time monitoring tool **written in Go** for Docker containers. It provides developers with instant visibility into container resource usage, logs, and system metrics directly in the terminal. Perfect for local development environments, GoWatch works with **any service running in Docker** regardless of the programming language, with planned AWS Serverless support for monitoring CloudWatch, XRay, Lambda, and CloudFormation resources.
@@ -365,7 +367,7 @@ The `vim` preset is the `default` preset plus `j`, `k`, `g`, `G`, `Ctrl+D` and `
 }
 ```
 
-`exported_at` is RFC 3339. `search` is the text in the search field and `min_log_level` is the minimum level (`INFO`, `WARN` or `ERROR`); both are always present and are empty strings when no search text or minimum level is set. `level` is `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR` or `FATAL`, and is left out for a line whose level could not be read. `logs` is `[]` when nothing is on screen. The lines are the raw log text, in the order they are shown.
+Docker monitoring requires zero configuration. For AWS integrations, GoWatch utilizes standard AWS environment variables (e.g., `AWS_REGION`, `AWS_ENDPOINT_URL`, `AWS_PROFILE`) for cloud credential and endpoint setup.
 
 ## Use Cases
 
