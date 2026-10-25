@@ -42,6 +42,9 @@ func TestDefaultMatchesLegacyValues(t *testing.T) {
 	if cfg.AWS.Profile != "" || cfg.AWS.RefreshInterval != 0 || cfg.AWS.DiscoveryInterval != 0 {
 		t.Errorf("AWS profile and intervals must default to zero (zero means the built-in 15s and 60s), got %q / %s / %s", cfg.AWS.Profile, cfg.AWS.RefreshInterval, cfg.AWS.DiscoveryInterval)
 	}
+	if len(cfg.AWS.Accounts) != 0 {
+		t.Errorf("AWS accounts must default to none, got %q", cfg.AWS.Accounts)
+	}
 	if cfg.Filters.Search != "" || len(cfg.Filters.Status) != 0 || cfg.Filters.MinLogLevel() != metrics.LogLevelUnknown {
 		t.Errorf("filters must default to none, got %+v", cfg.Filters)
 	}
@@ -67,6 +70,16 @@ func TestAWSProfileAndIntervalsAreLoaded(t *testing.T) {
 	}
 	if cfg.AWS.Profile != "dev" || cfg.AWS.RefreshInterval != 30*time.Second || cfg.AWS.DiscoveryInterval != 2*time.Minute {
 		t.Errorf("AWS = %+v, want profile dev, refresh 30s and discovery 2m", cfg.AWS)
+	}
+}
+
+func TestAWSAccountsAreLoaded(t *testing.T) {
+	cfg, err := loadYAML(t, "aws:\n  accounts: [\"123456789012\", \"210987654321/Admin\"]\n")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if want := []string{"123456789012", "210987654321/Admin"}; !reflect.DeepEqual(cfg.AWS.Accounts, want) {
+		t.Errorf("AWS.Accounts = %q, want %q", cfg.AWS.Accounts, want)
 	}
 }
 

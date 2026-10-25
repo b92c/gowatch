@@ -36,11 +36,16 @@ func (p Problem) StatusText() string {
 }
 
 // The steps classifyError is told about. They are also the words of the
-// generic message "<step> failed: ...".
+// generic message "<step> failed: ...". The last four are the SSO steps: getting
+// the access token of the login and the three calls made with it.
 const (
 	opLoadConfig        = "AWS config"
 	opAuth              = "AWS credentials"
 	opGetCallerIdentity = "GetCallerIdentity"
+	opSSOAccess         = "SSO token"
+	opListAccounts      = "ListAccounts"
+	opListAccountRoles  = "ListAccountRoles"
+	opRoleAccess        = "GetRoleCredentials"
 )
 
 // The fixed texts of the problems the dashboard knows how to explain.
@@ -61,6 +66,10 @@ const (
 
 // maxProblemRunes is the longest one-line error text; longer ones are cut.
 const maxProblemRunes = 120
+
+// codeUnauthorized is what the SSO portal answers when it does not accept the
+// access token.
+const codeUnauthorized = "UnauthorizedException"
 
 // API error codes that mean the credentials were rejected, and that mean the
 // caller may not do what it asked.
@@ -99,13 +108,17 @@ var ssoSources = []awssdk.CredentialSource{
 //  3. an invalid SSO token anywhere in the chain, then, while resolving the
 //     credentials, no known source or IMDS as the last one: no provider found;
 //  4. a timeout, a DNS failure or another network error;
-//  5. while resolving the credentials, an SSO source;
-//  6. an API code that says the keys were rejected;
-//  7. an API code that says access is denied;
-//  8. a credential_process that failed;
-//  9. anything else, cut to the first line of the error.
+//  5. an SSO access token that is missing, expired or could not be refreshed
+//     (errSSOTokenExpired);
+//  6. while resolving the credentials, an SSO source;
+//  7. on an SSO step, the portal answering that it does not accept the token
+//     (UnauthorizedException);
+//  8. an API code that says the keys were rejected;
+//  9. an API code that says access is denied;
+//  10. a credential_process that failed;
+//  11. anything else, cut to the first line of the error.
 //
-// Rule 8 never quotes the error: when the output of the process is not valid
+// Rule 10 never quotes the error: when the output of the process is not valid
 // JSON the SDK puts it in the error, and the process prints the credential.
 func classifyError(op string, err error, sources []awssdk.CredentialSource) (p Problem, throttled bool) {
 	var apiErr smithy.APIError
@@ -141,12 +154,19 @@ func classifyError(op string, err error, sources []awssdk.CredentialSource) (p P
 		return Problem{Text: prefixUnreachable + "network error"}, false
 	}
 
+	if errors.Is(err, errSSOTokenExpired) {
+		return Problem{Text: textSSOExpired, Hint: hintSSOExpired}, false
+	}
+
 	if op == opAuth && hasSSOSource(sources) {
 		return Problem{Text: textSSOExpired, Hint: hintSSOExpired}, false
 	}
 
 	if hasAPIErr {
 		code := apiErr.ErrorCode()
+		if code == codeUnauthorized && isSSOStep(op) {
+			return Problem{Text: textSSOExpired, Hint: hintSSOExpired}, false
+		}
 		if _, ok := badKeyCodes[code]; ok {
 			return Problem{Text: textBadKeys, Hint: hintBadKeys}, false
 		}
@@ -161,6 +181,15 @@ func classifyError(op string, err error, sources []awssdk.CredentialSource) (p P
 	}
 
 	return Problem{Text: op + " failed: " + oneLine(err.Error())}, false
+}
+
+// isSSOStep reports whether op is a step that uses the SSO access token.
+func isSSOStep(op string) bool {
+	switch op {
+	case opSSOAccess, opListAccounts, opListAccountRoles, opRoleAccess:
+		return true
+	}
+	return false
 }
 
 // hasSSOSource reports whether any of the sources is an SSO login.

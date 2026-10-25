@@ -13,7 +13,7 @@
     "hasCI": true
   },
   "structure": {
-    "totalFiles": 33,
+    "totalFiles": 34,
     "topDirectories": [
       {
         "name": "cmd/gowatch",
@@ -59,9 +59,9 @@
       },
       {
         "name": "internal/aws",
-        "description": "AWS client built on aws-sdk-go-v2: settings and enablement, error classification, state and manager, and a poller that resolves the credentials and reads the identity of the active credentials. SSO accounts and CloudWatch Logs are not read yet",
-        "fileCount": 6,
-        "files": ["client.go", "settings.go", "errors.go", "sdk.go", "poller.go", "accounts.go"]
+        "description": "AWS client built on aws-sdk-go-v2: settings and enablement, error classification, state and manager, SSO token handling, and a poller that resolves the credentials, reads the identity of the active credentials and lists the accounts of its SSO login. CloudWatch Logs are not read yet",
+        "fileCount": 7,
+        "files": ["client.go", "settings.go", "errors.go", "sdk.go", "poller.go", "accounts.go", "sso.go"]
       },
       {
         "name": "pkg/metrics",
@@ -166,7 +166,7 @@
     {
       "name": "AWS Client Manager",
       "path": "internal/aws/client.go",
-      "description": "AWS state and options (AWS_* environment variables take priority over the config file); the manager resolves its settings without any AWS call, a poller goroutine started by main resolves the credentials and reads the identity of the active credentials, and GetState() returns a copy of the snapshot",
+      "description": "AWS state and options (AWS_* environment variables take priority over the config file); the manager resolves its settings without any AWS call, a poller goroutine started by main resolves the credentials, reads the identity of the active credentials and lists the accounts of its SSO login, and GetState() returns a copy of the snapshot",
       "exports": ["AWSClientManager", "NewAWSClientManager", "NewAWSClientManagerWithOptions", "Options", "AWSState", "Account", "Identity", "Conn", "Problem", "LineHook"],
       "dependencies": []
     },
@@ -227,7 +227,7 @@
     },
     {
       "step": 7,
-      "description": "The collector lists containers, fetches stats and logs for each, correlates traces from the log lines, evaluates the alert rules and copies the AWS state (the identity row once the AWS poller has connected)"
+      "description": "The collector lists containers, fetches stats and logs for each, correlates traces from the log lines, evaluates the alert rules and copies the AWS state (the identity row, and the rows of the SSO login, once the AWS poller has connected)"
     },
     {
       "step": 8,

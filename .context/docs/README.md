@@ -15,7 +15,7 @@ Welcome to the GoWatch repository knowledge base. Start with the project overvie
 - `internal/ui/` — Terminal dashboard using tcell/tview: themes, panel layout, configurable keybindings and the help page
 - `internal/config/` — YAML configuration loading, validation and the example file
 - `internal/trace/` — Trace store, log correlator and OTLP/HTTP JSON receiver (the exporter is not wired)
-- `internal/aws/` — AWS client built on the AWS SDK for Go v2: settings, error classification and a poller that shows the identity of the active credentials (SSO accounts and CloudWatch Logs are not read yet)
+- `internal/aws/` — AWS client built on the AWS SDK for Go v2: settings, error classification and a poller that shows the identity of the active credentials and the accounts of its SSO login (CloudWatch Logs are not read yet)
 - `pkg/metrics/` — Public metrics types
 - `docker-compose.yaml` — Docker development environment
 - `makefile` — Build and development commands

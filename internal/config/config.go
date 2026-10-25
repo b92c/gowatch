@@ -70,12 +70,14 @@ type OTLPReceiverConfig struct {
 // AWSConfig holds the AWS integration settings. Enabled is one of "auto",
 // "true" or "false"; AWS_* environment variables take priority over the other
 // fields. A zero RefreshInterval or DiscoveryInterval means the built-in value
-// (15s and 60s).
+// (15s and 60s). Accounts lists the extra accounts to monitor through SSO, each
+// as "<account id>" or "<account id>/<role name>".
 type AWSConfig struct {
 	Region            string        `yaml:"region"`
 	EndpointURL       string        `yaml:"endpoint_url"`
 	Enabled           string        `yaml:"enabled"`
 	Profile           string        `yaml:"profile"`
+	Accounts          []string      `yaml:"accounts"`
 	RefreshInterval   time.Duration `yaml:"refresh_interval"`
 	DiscoveryInterval time.Duration `yaml:"discovery_interval"`
 }

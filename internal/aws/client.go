@@ -4,8 +4,10 @@
 // whether AWS is configured at all) when it is built, from environment
 // variables and file metadata only. Everything that talks to AWS runs later, on
 // one poller goroutine that main starts: it loads the SDK configuration, asks
-// who the credentials belong to and publishes a snapshot of what it found. The
-// dashboard reads that snapshot through GetState, which never waits for AWS.
+// who the credentials belong to, lists the accounts of the SSO login of the
+// profile, gets credentials for the accounts that aws.accounts asks to monitor,
+// and publishes a snapshot of what it found. The dashboard reads that snapshot
+// through GetState, which never waits for AWS.
 //
 // The package does not import internal/docker, internal/ui or internal/filter.
 package aws
@@ -52,29 +54,36 @@ type Account struct {
 	UpdatedAt time.Time // time of the discovery that produced the row
 	ID        string
 	Name      string // never empty: the SSO name when known, otherwise the ID
+	Role      string // role used to monitor the account through SSO; empty for the identity account
 	Status    string
-	Identity  bool // the account of the active credentials
+	Roles     []string // roles the SSO login can use in the account
+	Identity  bool     // the account of the active credentials
 }
 
 // AWSState is a snapshot of what the manager knows. GetState returns a copy
 // that shares nothing with the manager.
 type AWSState struct {
-	UpdatedAt     time.Time
-	Identity      Identity
-	LastError     Problem // connection problem: config, credentials or identity
-	Region        string  // provisional until the SDK resolves it
-	Profile       string
-	EndpointURL   string
-	EnabledReason string
-	Conn          Conn
-	Accounts      []Account
-	Enabled       bool
-	Connected     bool
+	UpdatedAt      time.Time
+	Identity       Identity
+	LastError      Problem // connection problem: config, credentials or identity
+	DiscoveryError Problem // SSO discovery problem; the identity can still be connected
+	Region         string  // provisional until the SDK resolves it
+	Profile        string
+	EndpointURL    string
+	EnabledReason  string
+	Conn           Conn
+	Accounts       []Account
+	Enabled        bool
+	Connected      bool
 }
 
-// clone returns a copy of s that shares no slice with it.
+// clone returns a copy of s that shares no slice with it, the roles of each
+// account included.
 func (s AWSState) clone() AWSState {
 	s.Accounts = slices.Clone(s.Accounts)
+	for i := range s.Accounts {
+		s.Accounts[i].Roles = slices.Clone(s.Accounts[i].Roles)
+	}
 	return s
 }
 
@@ -88,6 +97,10 @@ type Options struct {
 	EndpointURL string
 	// Profile is the shared config profile; AWS_PROFILE takes priority.
 	Profile string
+	// Accounts lists the extra accounts to monitor through SSO, each as
+	// "<account id>" or "<account id>/<role name>". The config validated the
+	// shape of every entry.
+	Accounts []string
 	// RefreshInterval is how often the poller makes a pass. Zero or less means
 	// DefaultRefreshInterval.
 	RefreshInterval time.Duration
@@ -107,7 +120,7 @@ const (
 // value. docker.Configure keeps the current manager for a zero Options.
 func (o Options) IsZero() bool {
 	return o.Enabled == nil && o.Region == "" && o.EndpointURL == "" && o.Profile == "" &&
-		o.RefreshInterval == 0 && o.DiscoveryInterval == 0
+		len(o.Accounts) == 0 && o.RefreshInterval == 0 && o.DiscoveryInterval == 0
 }
 
 // AWSClientManager holds the resolved AWS settings and the latest snapshot of

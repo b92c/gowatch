@@ -80,6 +80,11 @@ func TestDefaultYAML(t *testing.T) {
 			t.Errorf("aws from DefaultYAML = %+v, want no profile, refresh 15s and discovery 60s", cfg.AWS)
 		}
 		cfg.AWS.RefreshInterval, cfg.AWS.DiscoveryInterval = 0, 0
+		// "accounts: []" loads as an empty list, where Default() has none.
+		if len(cfg.AWS.Accounts) != 0 {
+			t.Errorf("aws.accounts from DefaultYAML = %q, want an empty list", cfg.AWS.Accounts)
+		}
+		cfg.AWS.Accounts = nil
 
 		// Normalize the spellings that legitimately differ from Default().
 		cfg.Alerts.RuleOverrides = nil

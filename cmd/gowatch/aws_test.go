@@ -28,6 +28,11 @@ func TestAWSOptionsFromConfig(t *testing.T) {
 				RefreshInterval: 30 * time.Second, DiscoveryInterval: 2 * time.Minute,
 			},
 		},
+		{
+			name: "the accounts are passed on",
+			in:   config.AWSConfig{Enabled: "auto", Accounts: []string{"123456789012", "210987654321/Admin"}},
+			want: aws.Options{Accounts: []string{"123456789012", "210987654321/Admin"}},
+		},
 		{name: "auto passes nothing", in: config.AWSConfig{Enabled: "auto"}, want: aws.Options{}},
 		{name: "true forces the integration on", in: config.AWSConfig{Enabled: "true"}, want: aws.Options{Enabled: &forcedOn}},
 	}
@@ -42,6 +47,19 @@ func TestAWSOptionsFromConfig(t *testing.T) {
 				t.Errorf("awsOptions(%+v) must be a zero aws.Options", tt.in)
 			}
 		})
+	}
+}
+
+// The options own their account list: a change to the slice of the config
+// afterwards must not reach them.
+func TestAWSOptionsCopiesTheAccounts(t *testing.T) {
+	in := config.AWSConfig{Accounts: []string{"123456789012"}}
+
+	got := awsOptions(in)
+	in.Accounts[0] = "changed"
+
+	if want := []string{"123456789012"}; !reflect.DeepEqual(got.Accounts, want) {
+		t.Errorf("awsOptions().Accounts = %q, want %q", got.Accounts, want)
 	}
 }
 

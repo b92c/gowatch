@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -194,6 +195,13 @@ func TestAWSAccountSummary(t *testing.T) {
 		{name: "the identity row carries the ARN", account: aws.Account{ID: "123456789012", Identity: true}, id: id, want: "123456789012; " + id.ARN},
 		{name: "an unknown ARN", account: aws.Account{ID: "123456789012", Identity: true}, id: aws.Identity{AccountID: "123456789012"}, want: "123456789012"},
 		{name: "another account", account: aws.Account{ID: "210987654321"}, id: id, want: "210987654321"},
+		{name: "the roles of the login", account: aws.Account{ID: "210987654321", Roles: []string{"ReadOnly", "Admin"}}, id: id, want: "210987654321; roles: ReadOnly, Admin"},
+		{
+			name: "the ARN, the roles and the role in use", id: id,
+			account: aws.Account{ID: "123456789012", Identity: true, Roles: []string{"ReadOnly"}, Role: "ReadOnly"},
+			want:    "123456789012; " + id.ARN + "; roles: ReadOnly; using ReadOnly",
+		},
+		{name: "a role in use without a list", account: aws.Account{ID: "210987654321", Role: "Admin"}, id: id, want: "210987654321; using Admin"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -228,5 +236,177 @@ func TestAWSStatusColors(t *testing.T) {
 				t.Errorf("awsStatusColor(%q) = %v, want %v", tt.status, got, tt.want)
 			}
 		})
+	}
+}
+
+// The accounts of an SSO login, with the statuses the manager gives them: the
+// roles and the role in use are part of the summary, and the status color follows
+// the usual rule.
+func TestAWSViewShowsSSOAccounts(t *testing.T) {
+	d := newTestDashboard(t, Options{})
+	d.awsViewMode = true
+	const arn = "arn:aws:sts::123456789012:assumed-role/ReadOnly/dev"
+	st := aws.AWSState{
+		Conn:     aws.ConnConnected,
+		Region:   "sa-east-1",
+		Identity: aws.Identity{AccountID: "123456789012", ARN: arn},
+		Accounts: []aws.Account{
+			{ID: "123456789012", Name: "dev", Status: "monitored", Identity: true, Roles: []string{"ReadOnly", "Admin"}},
+			{ID: "111111111111", Name: "audit", Status: "monitored (first role Billing)", Role: "Billing", Roles: []string{"Billing"}},
+			{ID: "222222222222", Name: "beta", Status: "error: role Admin not listed for this account", Roles: []string{"ReadOnly"}},
+			{ID: "333333333333", Name: "ops", Status: "available", Roles: []string{"ReadOnly"}},
+			{ID: "444444444444", Name: "444444444444", Status: "requires SSO"},
+		},
+	}
+
+	d.updateAWSTable(st)
+
+	want := []struct {
+		name, status, summary string
+		color                 tcell.Color
+	}{
+		{name: "dev", status: "monitored", summary: "123456789012; " + arn + "; roles: ReadOnly, Admin", color: d.theme.StatusOK},
+		{name: "audit", status: "monitored (first role Billing)", summary: "111111111111; roles: Billing; using Billing", color: d.theme.StatusOK},
+		{name: "beta", status: "error: role Admin not listed for this account", summary: "222222222222; roles: ReadOnly", color: d.theme.StatusError},
+		{name: "ops", status: "available", summary: "333333333333; roles: ReadOnly", color: d.theme.StatusWarn},
+		{name: "444444444444", status: "requires SSO", summary: "444444444444", color: d.theme.StatusWarn},
+	}
+	if got := d.servicesTable.GetRowCount(); got != len(want)+1 {
+		t.Fatalf("rows = %d, want the header and %d accounts", got, len(want))
+	}
+	for i, w := range want {
+		row := i + 1
+		name, status, summary := d.servicesTable.GetCell(row, 0), d.servicesTable.GetCell(row, 3), d.servicesTable.GetCell(row, 4)
+		if name.Text != w.name || status.Text != w.status || summary.Text != w.summary {
+			t.Errorf("row %d = (%q, %q, %q), want (%q, %q, %q)", row, name.Text, status.Text, summary.Text, w.name, w.status, w.summary)
+		}
+		if got := fgOf(status); got != w.color {
+			t.Errorf("row %d: the status %q is in %v, want %v", row, w.status, got, w.color)
+		}
+	}
+}
+
+func TestAWSTitleCarriesTheDiscoveryProblem(t *testing.T) {
+	connected := func(problem aws.Problem) aws.AWSState {
+		return aws.AWSState{
+			Region: "sa-east-1", Conn: aws.ConnConnected,
+			Identity:       aws.Identity{AccountID: "123456789012"},
+			DiscoveryError: problem,
+		}
+	}
+	tests := []struct {
+		name string
+		want string
+		st   aws.AWSState
+	}{
+		{
+			name: "a problem with its hint", st: connected(aws.Problem{Text: "SSO token expired", Hint: "run aws sso login"}),
+			want: " AWS Cloud Resources (sa-east-1) connected: 123456789012; SSO token expired - run aws sso login ",
+		},
+		{
+			name: "a problem without a hint", st: connected(aws.Problem{Text: "throttled by AWS, slowing down"}),
+			want: " AWS Cloud Resources (sa-east-1) connected: 123456789012; throttled by AWS, slowing down ",
+		},
+		{
+			name: "no problem", st: connected(aws.Problem{}),
+			want: " AWS Cloud Resources (sa-east-1) connected: 123456789012 ",
+		},
+		{
+			name: "the problem is escaped", st: connected(aws.Problem{Text: "ListAccounts failed [red]"}),
+			want: " AWS Cloud Resources (sa-east-1) connected: 123456789012; ListAccounts failed [red[] ",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := awsTitle(tt.st, true); got != tt.want {
+				t.Errorf("awsTitle() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+
+	// The same title reaches the table.
+	d := newTestDashboard(t, Options{})
+	d.awsViewMode = true
+	st := connected(aws.Problem{Text: "SSO token expired", Hint: "run aws sso login"})
+	st.Accounts = []aws.Account{{ID: "123456789012", Name: "123456789012", Status: aws.StatusMonitored, Identity: true}}
+	d.updateAWSTable(st)
+	if got, want := d.servicesTable.GetTitle(), " AWS Cloud Resources (sa-east-1) connected: 123456789012; SSO token expired - run aws sso login "; got != want {
+		t.Errorf("title of the table = %q, want %q", got, want)
+	}
+}
+
+// Review Focus 3: an account named "Team [prod]" shows as written, not as a tag.
+func TestAWSViewEscapesAccountNames(t *testing.T) {
+	d := newTestDashboard(t, Options{})
+	d.awsViewMode = true
+	containers := sampleContainers()
+	containers.AWS = aws.AWSState{
+		Conn:     aws.ConnConnected,
+		Region:   "sa-east-1",
+		Identity: aws.Identity{AccountID: "123456789012"},
+		Accounts: []aws.Account{
+			{ID: "123456789012", Name: "Team [prod]", Status: aws.StatusMonitored, Identity: true, Roles: []string{"Role [x]"}},
+		},
+	}
+	d.Update(containers)
+
+	if got, want := d.servicesTable.GetCell(1, 0).Text, "Team [prod[]"; got != want {
+		t.Errorf("name cell = %q, want %q", got, want)
+	}
+	if got, want := d.servicesTable.GetCell(1, 4).Text, "123456789012; roles: Role [x[]"; got != want {
+		t.Errorf("summary cell = %q, want %q", got, want)
+	}
+	shot := drawDashboard(t, d, 160, 40)
+	for _, text := range []string{"Team [prod]", "roles: Role [x]"} {
+		if _, _, ok := shot.find(text); !ok {
+			t.Errorf("%q is not on screen:\n%s", text, shot.text())
+		}
+	}
+}
+
+// The table is read from its first row. A tview table that was once shorter
+// than its panel scrolls itself to its end when it grows, which hides the
+// identity row as soon as the accounts do not fit; the single row of a pass that
+// is still connecting is such a short table.
+func TestAWSViewShowsTheTopOfALongList(t *testing.T) {
+	const width, height = 160, 30 // the panel shows the header and two rows
+	d := newTestDashboard(t, Options{})
+	d.awsViewMode = true
+	containers := sampleContainers()
+	containers.AWS = aws.AWSState{Conn: aws.ConnConnecting}
+	d.Update(containers)
+	drawDashboard(t, d, width, height)
+
+	accounts := []aws.Account{{ID: "123456789012", Name: "identity-account", Status: aws.StatusMonitored, Identity: true}}
+	for i := 1; i <= 8; i++ {
+		accounts = append(accounts, aws.Account{ID: fmt.Sprintf("2000000000%02d", i), Name: fmt.Sprintf("account-%02d", i), Status: aws.StatusAvailable})
+	}
+	containers.AWS = aws.AWSState{
+		Conn:     aws.ConnConnected,
+		Region:   "sa-east-1",
+		Identity: aws.Identity{AccountID: "123456789012"},
+		Accounts: accounts,
+	}
+
+	// The table is filled again at every refresh of the dashboard.
+	for refresh := 1; refresh <= 2; refresh++ {
+		d.Update(containers)
+		shot := drawDashboard(t, d, width, height)
+
+		if row, column := d.servicesTable.GetOffset(); row != 0 || column != 0 {
+			t.Errorf("refresh %d: the table is scrolled to row %d, column %d, want its first row", refresh, row, column)
+		}
+		if _, _, ok := shot.find("identity-account"); !ok {
+			t.Errorf("refresh %d: the identity row is not on screen:\n%s", refresh, shot.text())
+		}
+		visible := 0
+		for _, a := range accounts {
+			if _, _, ok := shot.find(a.Name); ok {
+				visible++
+			}
+		}
+		if visible == len(accounts) {
+			t.Fatalf("refresh %d: all %d accounts are on screen, so the list fits and the test proves nothing:\n%s", refresh, visible, shot.text())
+		}
 	}
 }

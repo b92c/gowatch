@@ -36,9 +36,14 @@ func awsRegion(st aws.AWSState) string {
 
 // awsTitle is the title of the services table in the AWS view: the region the
 // SDK resolved, then the connection status. An error shows its hint only when
-// no row can carry it.
+// no row can carry it. A problem with the SSO discovery follows the status, so a
+// connected identity with an expired SSO login says why the accounts are old.
 func awsTitle(st aws.AWSState, hasRows bool) string {
-	return " AWS Cloud Resources (" + tview.Escape(awsRegion(st)) + ") " + tview.Escape(awsStatus(st, hasRows)) + " "
+	status := awsStatus(st, hasRows)
+	if st.DiscoveryError.Text != "" {
+		status += "; " + st.DiscoveryError.Message()
+	}
+	return " AWS Cloud Resources (" + tview.Escape(awsRegion(st)) + ") " + tview.Escape(status) + " "
 }
 
 // awsStatus is the status part of the title.
@@ -76,13 +81,21 @@ func awsExplanation(st aws.AWSState) string {
 	return explainNotConfigured // ConnNotConfigured and the zero state
 }
 
-// accountSummary is the Metrics Summary cell of an account: its ID and, for the
-// account of the active credentials, the ARN of the caller.
+// accountSummary is the Metrics Summary cell of an account: its ID; for the
+// account of the active credentials, the ARN of the caller; the roles the SSO
+// login can use in it; and the role it is monitored with.
 func accountSummary(a aws.Account, id aws.Identity) string {
+	summary := a.ID
 	if a.Identity && id.ARN != "" {
-		return a.ID + "; " + id.ARN
+		summary += "; " + id.ARN
 	}
-	return a.ID
+	if len(a.Roles) > 0 {
+		summary += "; roles: " + strings.Join(a.Roles, ", ")
+	}
+	if a.Role != "" {
+		summary += "; using " + a.Role
+	}
+	return summary
 }
 
 // awsStatusColor colors a status: red for an error, green for a healthy one
@@ -107,6 +120,10 @@ func (d *Dashboard) awsStatusColor(status string) tcell.Color {
 func (d *Dashboard) updateAWSTable(st aws.AWSState) {
 	t := d.theme
 	d.servicesTable.Clear()
+	// A tview table that was once shorter than its panel keeps itself scrolled to
+	// its end when it grows, so without this the identity row would leave the
+	// screen once the accounts do not fit.
+	d.servicesTable.ScrollToBeginning()
 	d.servicesTable.SetTitle(awsTitle(st, len(st.Accounts) > 0))
 
 	for col, header := range awsTableHeaders {

@@ -36,7 +36,7 @@ GoWatch monitors Docker containers and displays real-time metrics (CPU, memory, 
 - **internal/ui/components.go** - Reusable UI components
 - **internal/config/** - YAML configuration (`Config`, `Default()`, `Load()`, `Validate()`, `DefaultYAML()`)
 - **internal/trace/** - Trace store, log correlator (called on every log line by the collector), OTLP/HTTP JSON receiver (started by `main` when enabled) and an `Exporter` that nothing outside the tests calls
-- **internal/aws/** - AWS client built on `aws-sdk-go-v2`: `AWSClientManager` (`client.go`) resolves the settings when it is built (`settings.go`, no AWS call), classifies SDK errors into texts with hints (`errors.go`) and runs a poller goroutine that `main` starts (`poller.go`, `sdk.go`), which resolves the credentials and publishes the identity of the active credentials (`accounts.go`); `GetState()` returns a copy that shares nothing with the manager. SSO accounts and CloudWatch Logs are not read yet
+- **internal/aws/** - AWS client built on `aws-sdk-go-v2`: `AWSClientManager` (`client.go`) resolves the settings when it is built (`settings.go`, no AWS call), classifies SDK errors into texts with hints (`errors.go`) and runs a poller goroutine that `main` starts (`poller.go`, `sdk.go`), which resolves the credentials, publishes the identity of the active credentials and lists the accounts of the SSO login (`accounts.go`), with its token handling in `sso.go`; `GetState()` returns a copy that shares nothing with the manager. CloudWatch Logs are not read yet
 - **pkg/metrics/** - Public metrics types
 
 ## Development Workflow

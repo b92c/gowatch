@@ -3,6 +3,7 @@ package aws
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -55,6 +56,7 @@ type settings struct {
 	configFile        string // AWS_CONFIG_FILE, else <home>/.aws/config, "" when neither is known
 	credentialsFile   string // AWS_SHARED_CREDENTIALS_FILE, else <home>/.aws/credentials, "" when neither is known
 	enabledReason     string
+	accounts          []string // a copy of Options.Accounts
 	refreshInterval   time.Duration
 	discoveryInterval time.Duration
 	mode              enableMode
@@ -70,6 +72,7 @@ func resolveSettings(o Options) settings {
 	s := settings{
 		profile:           "default",
 		region:            fallbackRegion,
+		accounts:          slices.Clone(o.Accounts),
 		refreshInterval:   o.RefreshInterval,
 		discoveryInterval: o.DiscoveryInterval,
 	}
@@ -161,6 +164,8 @@ func detectSignal(o Options, configFile, credentialsFile string) (reason string,
 		return "aws.region is set", true
 	case o.EndpointURL != "":
 		return "aws.endpoint_url is set", true
+	case len(o.Accounts) > 0:
+		return "aws.accounts is set", true
 	}
 	if isRegularFile(configFile) {
 		return "shared config file found", true

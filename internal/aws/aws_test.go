@@ -106,6 +106,9 @@ func TestOptionsIsZero(t *testing.T) {
 	if !(Options{}).IsZero() {
 		t.Error("Options{} must be zero")
 	}
+	if !(Options{Accounts: []string{}}).IsZero() {
+		t.Error("Options with an empty account list must be zero")
+	}
 	tests := []struct {
 		name string
 		opts Options
@@ -117,6 +120,7 @@ func TestOptionsIsZero(t *testing.T) {
 		{name: "Profile", opts: Options{Profile: "dev"}},
 		{name: "RefreshInterval", opts: Options{RefreshInterval: time.Second}},
 		{name: "DiscoveryInterval", opts: Options{DiscoveryInterval: time.Second}},
+		{name: "Accounts", opts: Options{Accounts: []string{"123456789012"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -130,18 +134,26 @@ func TestOptionsIsZero(t *testing.T) {
 func TestGetStateIsADeepCopy(t *testing.T) {
 	isolateAWSEnv(t)
 	mgr := NewAWSClientManagerWithOptions(Options{})
-	accounts := []Account{{ID: "123456789012", Name: "dev", Status: StatusMonitored}}
+	accounts := []Account{{ID: "123456789012", Name: "dev", Status: StatusMonitored, Roles: []string{"ReadOnly", "Admin"}}}
 	mgr.publishState(AWSState{Accounts: accounts})
 
 	accounts[0].Name = "changed after publishing"
+	accounts[0].Roles[0] = "changed after publishing"
 	snapshot := mgr.GetState()
 	if snapshot.Accounts[0].Name != "dev" {
 		t.Fatalf("publishState kept the caller's slice: name = %q, want dev", snapshot.Accounts[0].Name)
 	}
+	if snapshot.Accounts[0].Roles[0] != "ReadOnly" {
+		t.Fatalf("publishState kept the caller's roles: role = %q, want ReadOnly", snapshot.Accounts[0].Roles[0])
+	}
 
 	snapshot.Accounts[0].Name = "changed"
+	snapshot.Accounts[0].Roles[0] = "changed"
 	if got := mgr.GetState().Accounts[0].Name; got != "dev" {
 		t.Errorf("GetState() shares its slice with the manager: name = %q, want dev", got)
+	}
+	if got := mgr.GetState().Accounts[0].Roles[0]; got != "ReadOnly" {
+		t.Errorf("GetState() shares the roles with the manager: role = %q, want ReadOnly", got)
 	}
 }
 
@@ -157,7 +169,7 @@ func TestGetStateIsSafeAlongsidePublish(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := range 500 {
-				mgr.publishState(AWSState{Region: "eu-west-1", Accounts: []Account{{ID: "123456789012", Name: "dev", Status: StatusMonitored, UpdatedAt: time.Unix(int64(i), 0)}}})
+				mgr.publishState(AWSState{Region: "eu-west-1", Accounts: []Account{{ID: "123456789012", Name: "dev", Status: StatusMonitored, Roles: []string{"ReadOnly"}, UpdatedAt: time.Unix(int64(i), 0)}}})
 			}
 		}()
 		go func() {
@@ -166,6 +178,7 @@ func TestGetStateIsSafeAlongsidePublish(t *testing.T) {
 				st := mgr.GetState()
 				if len(st.Accounts) > 0 {
 					st.Accounts[0].Name = "reader"
+					st.Accounts[0].Roles[0] = "reader"
 				}
 			}
 		}()

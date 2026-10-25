@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -74,6 +75,7 @@ func awsOptions(c config.AWSConfig) aws.Options {
 		Region:            c.Region,
 		EndpointURL:       c.EndpointURL,
 		Profile:           c.Profile,
+		Accounts:          slices.Clone(c.Accounts),
 		RefreshInterval:   c.RefreshInterval,
 		DiscoveryInterval: c.DiscoveryInterval,
 	}

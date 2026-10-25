@@ -39,7 +39,7 @@ Status checked against the code in October 2026. Legend:
 - Phase 1 🟡: P1.2 and P1.4 are done; P1.1 and P1.3 have gaps (no min/max/average display, no status or label filter while running).
 - Phase 2 ✅: done, except the Emacs keybinding mode.
 - Phase 3 🟡: P3.1 is done; traces from log lines and from the optional OTLP receiver show in the System Resources panel. There is no flamegraph, no log-to-span link and nothing calls the exporter.
-- Phase 4 🟡: foundation in progress: AWS SDK client, enablement, identity of the active credentials; SSO accounts and CloudWatch Logs pending. The AWS view shows the identity of the active credentials; P4.1-P4.4 have not started.
+- Phase 4 🟡: foundation: AWS SDK client, enablement, identity, SSO-linked accounts and `aws.accounts`; CloudWatch Logs pending. The AWS view shows the identity of the active credentials and the accounts of the SSO login; P4.1-P4.4 have not started.
 - Phase 5 🟡: P5.1 works in part (CPU, memory, OOM and restarting containers) and the alerts list works; P5.2 has not started; P5.3 cannot acknowledge alerts or show statistics.
 - Phases 6 and 7 ⚪: not started.
 
@@ -133,12 +133,12 @@ Status: only placeholder code exists. `trace.Exporter` posts a trace to a URL as
 
 ## Phase 4: AWS Serverless Integration (Q1-Q2 2027) 🟡 (foundation in progress)
 
-Foundation in progress: AWS SDK client, enablement, identity of the active credentials; SSO accounts and CloudWatch Logs pending.
+Foundation: AWS SDK client, enablement, identity, SSO-linked accounts and `aws.accounts`; CloudWatch Logs pending.
 
-- `internal/aws` is a client built on `aws-sdk-go-v2`. `AWSClientManager` resolves the profile, region, endpoint and whether AWS is configured (`aws.enabled`: `auto`, `true` or `false`) when it is built, without any AWS call. A poller goroutine that `main` starts loads the SDK configuration, resolves the credentials and calls `sts:GetCallerIdentity`, and publishes a snapshot that the dashboard reads. SDK errors are classified into short texts with hints (no credentials, expired SSO token, expired or invalid keys, access denied, throttling, unreachable).
-- The AWS view (`a`) shows the connection status in its title and one `Account` row for the account of the active credentials, or a single row that explains why there is none (not configured, disabled, connecting, or the problem).
-- The `aws.*` settings are `enabled`, `region`, `endpoint_url`, `profile`, `refresh_interval` and `discovery_interval`. `aws.profile` is accepted from `./gowatch.yaml`; `aws.endpoint_url` is not.
-- Pending: the SSO accounts of the login and CloudWatch Logs in the logs panel (P4.1), and the collectors of P4.2-P4.4. The placeholder collectors for CloudWatch, Lambda, X-Ray and CloudFormation were removed.
+- `internal/aws` is a client built on `aws-sdk-go-v2`. `AWSClientManager` resolves the profile, region, endpoint and whether AWS is configured (`aws.enabled`: `auto`, `true` or `false`) when it is built, without any AWS call. A poller goroutine that `main` starts loads the SDK configuration, resolves the credentials and calls `sts:GetCallerIdentity`, and publishes a snapshot that the dashboard reads. When the profile has an SSO login (an `sso_session` or a legacy profile), the same discovery pass lists the accounts and roles of the login with its token (`sso:ListAccounts` and `sso:ListAccountRoles`, at most 100 accounts and 20 roles each) and gets credentials (`sso:GetRoleCredentials`) for the accounts named in `aws.accounts`. SDK errors are classified into short texts with hints (no credentials, expired SSO token, expired or invalid keys, access denied, throttling, unreachable).
+- The AWS view (`a`) shows the connection status in its title, with the SSO discovery problem after it when there is one, and an `Account` row for the account of the active credentials followed by one row per account of the SSO login (`monitored`, `available`, or the status of the `aws.accounts` entry); with no row, a single row explains why (not configured, disabled, connecting, or the problem).
+- The `aws.*` settings are `enabled`, `region`, `endpoint_url`, `profile`, `refresh_interval`, `discovery_interval` and `accounts`. `aws.profile` and `aws.accounts` are accepted from `./gowatch.yaml`; `aws.endpoint_url` is not.
+- Pending: CloudWatch Logs in the logs panel (P4.1), and the collectors of P4.2-P4.4. The placeholder collectors for CloudWatch, Lambda, X-Ray and CloudFormation were removed.
 
 **P4.1 - CloudWatch Logs Integration** ⚪
 - CloudWatch Log Groups monitoring
@@ -251,7 +251,7 @@ Original plan, kept as written:
 Where things stand (October 2026). This list is status only and does not change the plan above; the quarters in the phase titles and the months above are those of the original plan and have not been revised.
 
 - **Done**: Phase 2 (except the Emacs mode), P1.2, P1.4 and P3.1.
-- **Partly done**: P1.1 and P1.3 (Phase 1), P3.2 (Phase 3), the Phase 4 foundation (AWS SDK client, enablement and the identity of the active credentials; SSO accounts and CloudWatch Logs pending), P5.1 and P5.3 (Phase 5). What is missing is listed under each item.
+- **Partly done**: P1.1 and P1.3 (Phase 1), P3.2 (Phase 3), the Phase 4 foundation (AWS SDK client, enablement, identity, SSO-linked accounts and `aws.accounts`; CloudWatch Logs pending), P5.1 and P5.3 (Phase 5). What is missing is listed under each item.
 - **Not started**: P3.3 (only placeholder code exists: the exporter is not called), P4.1-P4.4 (CloudWatch Logs, Lambda, X-Ray and CloudFormation), P5.2, Phase 6 and Phase 7.
 
 ---

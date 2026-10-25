@@ -82,6 +82,7 @@ aws:
 	b.WriteString(`  profile: ""         # profile of ~/.aws/config; AWS_PROFILE takes priority; empty means default
   refresh_interval: 15s     # how often the AWS data is refreshed (5s-10m)
   discovery_interval: 60s   # how often identity, accounts and log groups are listed again (15s-1h)
+  accounts: []        # more accounts to monitor through SSO: "<account id>" or "<account id>/<role>"
 `)
 
 	b.WriteString(`

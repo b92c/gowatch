@@ -135,6 +135,23 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 	}
 }
 
+// The settings keep their own copy of aws.accounts, so a later change to the
+// slice of the caller never reaches a manager that was already built.
+func TestResolveSettingsCopiesAccounts(t *testing.T) {
+	isolateAWSEnv(t)
+	accounts := []string{"123456789012", "210987654321/Admin"}
+
+	s := resolveSettings(Options{Accounts: accounts})
+	accounts[0] = "changed"
+
+	if want := []string{"123456789012", "210987654321/Admin"}; !reflect.DeepEqual(s.accounts, want) {
+		t.Errorf("settings.accounts = %q, want %q", s.accounts, want)
+	}
+	if got := resolveSettings(Options{}).accounts; len(got) != 0 {
+		t.Errorf("settings.accounts without options = %q, want none", got)
+	}
+}
+
 func TestDetectSignal(t *testing.T) {
 	type signalCase struct {
 		setup      func(t *testing.T, home string)
@@ -147,6 +164,8 @@ func TestDetectSignal(t *testing.T) {
 		{name: "an option profile", opts: Options{Profile: "p"}, wantReason: "aws.profile is set", wantFound: true},
 		{name: "an option region", opts: Options{Region: "r"}, wantReason: "aws.region is set", wantFound: true},
 		{name: "an option endpoint", opts: Options{EndpointURL: "e"}, wantReason: "aws.endpoint_url is set", wantFound: true},
+		{name: "an option account", opts: Options{Accounts: []string{"123456789012"}}, wantReason: "aws.accounts is set", wantFound: true},
+		{name: "an empty account list is no signal", opts: Options{Accounts: []string{}}},
 		{
 			name: "the shared config file",
 			setup: func(t *testing.T, home string) {

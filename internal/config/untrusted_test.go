@@ -2,6 +2,7 @@ package config
 
 import (
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -145,6 +146,21 @@ func TestWorkingDirectoryLayerHonorsAWSProfile(t *testing.T) {
 	}
 	if cfg.AWS.Profile != "dev" {
 		t.Errorf("AWS.Profile = %q, want dev", cfg.AWS.Profile)
+	}
+}
+
+// aws.accounts only chooses among the accounts of the user's own SSO login, so
+// the working-directory file may set it.
+func TestWorkingDirectoryLayerHonorsAWSAccounts(t *testing.T) {
+	home, work := t.TempDir(), t.TempDir()
+	writeFile(t, localConfigPath(work), "aws:\n  accounts: [\"123456789012\"]\n")
+
+	cfg, _, err := Load(LoadOptions{HomeDir: home, WorkDir: work})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if want := []string{"123456789012"}; !reflect.DeepEqual(cfg.AWS.Accounts, want) {
+		t.Errorf("AWS.Accounts = %q, want %q", cfg.AWS.Accounts, want)
 	}
 }
 

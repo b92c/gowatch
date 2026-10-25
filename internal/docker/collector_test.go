@@ -291,6 +291,10 @@ func TestConfigureAWS(t *testing.T) {
 	if GetGlobalAWSManager() != before {
 		t.Error("zero aws.Options must keep the existing AWS manager")
 	}
+	Configure(Options{AWS: aws.Options{Accounts: []string{}}})
+	if GetGlobalAWSManager() != before {
+		t.Error("aws.Options with an empty account list must keep the existing AWS manager")
+	}
 
 	Configure(Options{AWS: aws.Options{Region: "ap-south-1", EndpointURL: "http://localhost:4566"}})
 	mgr := GetGlobalAWSManager()
@@ -309,6 +313,12 @@ func TestConfigureAWS(t *testing.T) {
 	}
 	if got := profiled.GetState().Profile; got != "dev" {
 		t.Errorf("manager profile = %q, want dev", got)
+	}
+
+	// So are the accounts alone.
+	Configure(Options{AWS: aws.Options{Accounts: []string{"123456789012"}}})
+	if GetGlobalAWSManager() == profiled {
+		t.Fatal("aws.Options with only accounts must replace the AWS manager")
 	}
 }
 
