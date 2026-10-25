@@ -1066,7 +1066,7 @@ func TestThrottledMintSkipsTheRestOfTheEntries(t *testing.T) {
 	if got := f.count("GetRoleCredentials"); got != 1 {
 		t.Errorf("GetRoleCredentials was called %d times, want 1: the throttled call ends the pass", got)
 	}
-	if got, want := statusOf(t, st, "prod").Status, "error: throttled by AWS, slowing down"; got != want {
+	if got, want := statusOf(t, st, "prod").Status, "error: throttled by AWS"; got != want {
 		t.Errorf("row of prod = %q, want %q", got, want)
 	}
 	if got := statusOf(t, st, "audit").Status; got != StatusAvailable {

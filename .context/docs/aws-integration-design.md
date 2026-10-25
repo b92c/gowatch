@@ -86,7 +86,7 @@ Tests for the detection must redirect `HOME`, `AWS_CONFIG_FILE` and `AWS_SHARED_
 
 - Profile: `AWS_PROFILE` wins; otherwise `aws.profile` from the config (passed as `config.WithSharedConfigProfile`); otherwise the SDK default (`default`).
 - Region: `AWS_REGION`, then `AWS_DEFAULT_REGION`, then `aws.region` from the config (passed as `config.WithRegion` only when the environment has none), then the region of the resolved profile, then `us-east-1`. This keeps the existing rule "environment beats config file, config file beats the fallback" and inserts the profile's region before the fallback, which is what makes the owner's setup work (their region lives in the profile). The title of the AWS view shows the region that was actually resolved.
-- Endpoint: `AWS_ENDPOINT_URL` (honored by the SDK natively), otherwise `aws.endpoint_url` from the config (`config.WithBaseEndpoint`). Used for LocalStack-style setups; applies to every service client.
+- Endpoint: `AWS_ENDPOINT_URL` (honored by the SDK natively), otherwise `aws.endpoint_url` from the config (`config.WithBaseEndpoint`). Used for LocalStack-style setups; applies to the STS client (and to the CloudWatch Logs client of stage 3). The SSO portal and OIDC clients, GoWatch's own and the ones the SDK's SSO credential provider builds, ignore every endpoint override and always call AWS in the SSO region of the profile, so the access token of the login is never sent anywhere else (owner decision, 2026-10-25).
 - The existing precedence tests in `internal/aws/aws_test.go` are updated to these rules, not deleted. `AWS_DEFAULT_REGION` becomes an enabling signal (4.2), which changes one of them on purpose.
 
 ### 4.4 Accounts (owner: show the linked accounts; call: how)
@@ -120,7 +120,7 @@ Tests for the detection must redirect `HOME`, `AWS_CONFIG_FILE` and `AWS_SHARED_
 
 - Table columns stay the six that exist: Resource Name, Type, Region, Status, Metrics Summary, Last Updated. Row types in this delivery: `Account` and `LogGroup`, accounts first, then groups grouped by account.
 - Status colors keep the rule the old rows had: `StatusOK` for healthy statuses (`monitored`, `connected`, `following`), `StatusWarn` for the others (`available`, `not followed (cap)`, `following (lagging)`, `requires SSO`, `connecting`), and `StatusError` for statuses that start with `error`. In `legacy_look_test.go` the subtest `aws resources` is rewritten to feed two rows of the new model (one healthy, one warning) and to assert the same literal colors it asserts today; the rest of the file is untouched.
-- The title keeps the prefix ` AWS Cloud Resources (<region>` (an interaction test checks the text `AWS Cloud Resources`) and gains a status after the region: `not configured`, `disabled`, `connecting`, `connected: <account id>` or `error: <short reason>`. Hints (`run aws sso login`) go into the Status column of the affected rows and into the title when there is no row to carry them. Texts pass through `tview.Escape`.
+- The title keeps the prefix ` AWS Cloud Resources (<region>` (an interaction test checks the text `AWS Cloud Resources`) and gains a status after the region: `not configured`, `disabled`, `connecting`, `connected: <account id>` or `error: <short reason>`; a problem with the SSO discovery follows a connected status as `; <short reason>`. Hints (`run aws sso login`) go into the Status column of the affected rows, or into the single explanatory row when there is no account row; the title shows the short form of a problem (its text up to the first colon) and never a hint, and appends the discovery problem only to a connected status, so that every fixed title fits in 80 columns with the common region names (owner decision, 2026-10-25). Texts pass through `tview.Escape`.
 - When the integration is off or not configured there is exactly one muted row explaining it, never a bare empty table. (The legacy subtest renders rows with the integration off; it exercises the row renderer, which draws whatever rows the state carries.)
 - The Logs panel, the System Resources panel and the help bar are unchanged in this delivery (the help page lists the two new actions of stage 4).
 
@@ -182,9 +182,9 @@ The state records the last error per concern (connection, discovery, per account
 
 - No credential provider found: `no AWS credentials found` + `configure the AWS CLI or set aws.enabled: false`.
 - The SDK's SSO token errors (expired or missing cached token, invalid SSO session): `SSO token expired` + `run aws sso login`.
-- STS rejects static credentials (`ExpiredToken`, `InvalidClientTokenId`, `UnrecognizedClientException`, `SignatureDoesNotMatch`): `AWS credentials expired or invalid` + `log in again (for SSO logins, aws sso login and re-export)`.
+- STS rejects static credentials (`ExpiredToken`, `InvalidClientTokenId`, `UnrecognizedClientException`, `SignatureDoesNotMatch`): `credentials expired or invalid` + `log in again and re-export the keys` (shortened on 2026-10-25 so the row fits in 80 columns).
 - Access denied on a call: `access denied: <operation>` (the ARN in the account row helps the user ask for the permission).
-- Throttling: `throttled by AWS, slowing down` and that pass is skipped (no retry storm).
+- Throttling: `throttled by AWS` and that pass is skipped (no retry storm).
 - Timeouts and network errors: `AWS unreachable: <short cause>`.
 
 Raw SDK errors are trimmed to one line and never include request bodies or tokens.

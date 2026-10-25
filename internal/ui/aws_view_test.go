@@ -2,8 +2,10 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/b92c/gowatch/internal/aws"
 	"github.com/gdamore/tcell/v2"
@@ -16,34 +18,37 @@ var noCredentials = aws.Problem{Text: "no AWS credentials found", Hint: "configu
 
 func TestAWSViewTitle(t *testing.T) {
 	tests := []struct {
-		name    string
-		want    string
-		st      aws.AWSState
-		hasRows bool
+		name string
+		want string
+		st   aws.AWSState
 	}{
 		{name: "the zero state", st: aws.AWSState{}, want: " AWS Cloud Resources (us-east-1) not configured "},
 		{name: "not configured", st: aws.AWSState{Region: "eu-west-1", Conn: aws.ConnNotConfigured}, want: " AWS Cloud Resources (eu-west-1) not configured "},
 		{name: "disabled", st: aws.AWSState{Conn: aws.ConnDisabled}, want: " AWS Cloud Resources (us-east-1) disabled "},
 		{name: "connecting", st: aws.AWSState{Conn: aws.ConnConnecting}, want: " AWS Cloud Resources (us-east-1) connecting "},
 		{
-			name: "connected", hasRows: true,
+			name: "connected",
 			st:   aws.AWSState{Region: "sa-east-1", Conn: aws.ConnConnected, Identity: aws.Identity{AccountID: "123456789012"}},
 			want: " AWS Cloud Resources (sa-east-1) connected: 123456789012 ",
 		},
 		{
-			name: "an error with no row to carry the hint",
-			st:   aws.AWSState{Conn: aws.ConnError, LastError: noCredentials},
-			want: " AWS Cloud Resources (us-east-1) error: no AWS credentials found - configure the AWS CLI or set aws.enabled: false ",
-		},
-		{
-			name: "an error with a row that carries the hint", hasRows: true,
+			name: "an error shows its text and never its hint",
 			st:   aws.AWSState{Conn: aws.ConnError, LastError: noCredentials},
 			want: " AWS Cloud Resources (us-east-1) error: no AWS credentials found ",
 		},
 		{
-			name: "an error without a hint",
+			name: "an error shows its text up to the first colon",
 			st:   aws.AWSState{Conn: aws.ConnError, LastError: aws.Problem{Text: "AWS unreachable: timeout"}},
-			want: " AWS Cloud Resources (us-east-1) error: AWS unreachable: timeout ",
+			want: " AWS Cloud Resources (us-east-1) error: AWS unreachable ",
+		},
+		{
+			name: "a failing identity does not show the discovery problem it keeps",
+			st: aws.AWSState{
+				Conn:           aws.ConnError,
+				LastError:      aws.Problem{Text: "credentials expired or invalid", Hint: "log in again and re-export the keys"},
+				DiscoveryError: aws.Problem{Text: "SSO token expired", Hint: "run aws sso login"},
+			},
+			want: " AWS Cloud Resources (us-east-1) error: credentials expired or invalid ",
 		},
 		{name: "the region is escaped", st: aws.AWSState{Region: "x[y]", Conn: aws.ConnConnecting}, want: " AWS Cloud Resources (x[y[]) connecting "},
 		{
@@ -54,7 +59,7 @@ func TestAWSViewTitle(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := awsTitle(tt.st, tt.hasRows); got != tt.want {
+			if got := awsTitle(tt.st); got != tt.want {
 				t.Errorf("awsTitle() = %q, want %q", got, tt.want)
 			}
 		})
@@ -300,12 +305,20 @@ func TestAWSTitleCarriesTheDiscoveryProblem(t *testing.T) {
 		st   aws.AWSState
 	}{
 		{
-			name: "a problem with its hint", st: connected(aws.Problem{Text: "SSO token expired", Hint: "run aws sso login"}),
-			want: " AWS Cloud Resources (sa-east-1) connected: 123456789012; SSO token expired - run aws sso login ",
+			name: "a problem shows its text only", st: connected(aws.Problem{Text: "SSO token expired", Hint: "run aws sso login"}),
+			want: " AWS Cloud Resources (sa-east-1) connected: 123456789012; SSO token expired ",
 		},
 		{
-			name: "a problem without a hint", st: connected(aws.Problem{Text: "throttled by AWS, slowing down"}),
-			want: " AWS Cloud Resources (sa-east-1) connected: 123456789012; throttled by AWS, slowing down ",
+			name: "a problem without a hint", st: connected(aws.Problem{Text: "throttled by AWS"}),
+			want: " AWS Cloud Resources (sa-east-1) connected: 123456789012; throttled by AWS ",
+		},
+		{
+			name: "a network problem shows its short form", st: connected(aws.Problem{Text: "AWS unreachable: timeout"}),
+			want: " AWS Cloud Resources (sa-east-1) connected: 123456789012; AWS unreachable ",
+		},
+		{
+			name: "a denied call shows its short form", st: connected(aws.Problem{Text: "access denied: ListAccounts"}),
+			want: " AWS Cloud Resources (sa-east-1) connected: 123456789012; access denied ",
 		},
 		{
 			name: "no problem", st: connected(aws.Problem{}),
@@ -318,7 +331,7 @@ func TestAWSTitleCarriesTheDiscoveryProblem(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := awsTitle(tt.st, true); got != tt.want {
+			if got := awsTitle(tt.st); got != tt.want {
 				t.Errorf("awsTitle() = %q, want %q", got, tt.want)
 			}
 		})
@@ -330,8 +343,96 @@ func TestAWSTitleCarriesTheDiscoveryProblem(t *testing.T) {
 	st := connected(aws.Problem{Text: "SSO token expired", Hint: "run aws sso login"})
 	st.Accounts = []aws.Account{{ID: "123456789012", Name: "123456789012", Status: aws.StatusMonitored, Identity: true}}
 	d.updateAWSTable(st)
-	if got, want := d.servicesTable.GetTitle(), " AWS Cloud Resources (sa-east-1) connected: 123456789012; SSO token expired - run aws sso login "; got != want {
+	if got, want := d.servicesTable.GetTitle(), " AWS Cloud Resources (sa-east-1) connected: 123456789012; SSO token expired "; got != want {
 		t.Errorf("title of the table = %q, want %q", got, want)
+	}
+}
+
+// tview draws the title of a box in width-2 columns and replaces the last one
+// with an ellipsis when the title is longer, so at 80 columns a title has 78.
+// Every title has to fit, with a region of nine characters and an account ID of
+// twelve digits: it shows the short form of a problem (its text up to the first
+// colon), never a hint and never the text of the SDK, and carries a discovery
+// problem only next to a connected status. The full text and the hint show in the
+// rows the problem affects or, with no account row, in the single explanatory row.
+func TestFixedTitlesFitIn80Columns(t *testing.T) {
+	const maxColumns = 78
+	const sdkMarker = "a line of the SDK"
+	sdkText := strings.Repeat(sdkMarker+" ", 12)[:200] // 200 characters of SDK text
+	erroring := func(text, hint string) aws.AWSState {
+		return aws.AWSState{Region: "sa-east-1", Conn: aws.ConnError, LastError: aws.Problem{Text: text, Hint: hint}}
+	}
+	connected := func(text, hint string) aws.AWSState {
+		return aws.AWSState{
+			Region: "sa-east-1", Conn: aws.ConnConnected,
+			Identity:       aws.Identity{AccountID: "123456789012"},
+			DiscoveryError: aws.Problem{Text: text, Hint: hint},
+		}
+	}
+	// A failing identity keeps the discovery problem of an earlier pass.
+	combined := func(connection, discovery aws.Problem) aws.AWSState {
+		return aws.AWSState{Region: "sa-east-1", Conn: aws.ConnError, LastError: connection, DiscoveryError: discovery}
+	}
+	expired := aws.Problem{Text: "SSO token expired", Hint: "run aws sso login"}
+	tests := []struct {
+		name   string
+		want   string // the exact title, when the test pins it
+		absent string // a text the title must not carry
+		st     aws.AWSState
+	}{
+		{name: "no credentials", st: erroring("no AWS credentials found", "configure the AWS CLI or set aws.enabled: false")},
+		{name: "SSO token expired", st: erroring("SSO token expired", "run aws sso login")},
+		{name: "keys expired or invalid", st: erroring("credentials expired or invalid", "log in again and re-export the keys")},
+		{name: "credential_process failed", st: erroring("credential_process failed", "check the credential_process of the profile")},
+		{name: "throttled", st: erroring("throttled by AWS", "")},
+		{name: "access denied", st: erroring("access denied: GetCallerIdentity", "")},
+		{name: "unreachable", st: erroring("AWS unreachable: DNS lookup failed", "")},
+		{name: "profile not found", st: erroring(`AWS profile "default" not found`, "check AWS_PROFILE or aws.profile")},
+		{name: "a failure of the SDK", st: erroring("GetCallerIdentity failed: "+sdkText, ""), absent: sdkMarker},
+
+		{name: "SSO discovery problem with its hint", st: connected("SSO token expired", "run aws sso login")},
+		{name: "SSO discovery throttled", st: connected("throttled by AWS", "")},
+		{name: "SSO discovery timeout", st: connected("AWS unreachable: timeout", "")},
+		{name: "SSO discovery DNS failure", st: connected("AWS unreachable: DNS lookup failed", "")},
+		{name: "SSO discovery network error", st: connected("AWS unreachable: network error", "")},
+		{name: "ListAccounts denied", st: connected("access denied: ListAccounts", "")},
+		{name: "ListAccountRoles denied", st: connected("access denied: ListAccountRoles", "")},
+		{name: "SSO discovery failure of the SDK", st: connected("ListAccounts failed: "+sdkText, ""), absent: sdkMarker},
+
+		{
+			name: "unreachable identity and an expired login", st: combined(aws.Problem{Text: "AWS unreachable: timeout"}, expired),
+			want: " AWS Cloud Resources (sa-east-1) error: AWS unreachable ",
+		},
+		{
+			name: "rejected keys and an expired login",
+			st:   combined(aws.Problem{Text: "credentials expired or invalid", Hint: "log in again and re-export the keys"}, expired),
+			want: " AWS Cloud Resources (sa-east-1) error: credentials expired or invalid ",
+		},
+		{
+			name: "unreachable identity and an unreachable portal",
+			st:   combined(aws.Problem{Text: "AWS unreachable: DNS lookup failed"}, aws.Problem{Text: "AWS unreachable: network error"}),
+			want: " AWS Cloud Resources (sa-east-1) error: AWS unreachable ",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			title := awsTitle(tt.st)
+
+			if n := utf8.RuneCountInString(title); n > maxColumns {
+				t.Errorf("the title %q has %d columns, want at most %d", title, n, maxColumns)
+			}
+			if tt.want != "" && title != tt.want {
+				t.Errorf("the title is %q, want %q", title, tt.want)
+			}
+			if tt.absent != "" && strings.Contains(title, tt.absent) {
+				t.Errorf("the title %q carries the text of the SDK", title)
+			}
+			for _, hint := range []string{tt.st.LastError.Hint, tt.st.DiscoveryError.Hint} {
+				if hint != "" && strings.Contains(title, hint) {
+					t.Errorf("the title %q carries the hint %q", title, hint)
+				}
+			}
+		})
 	}
 }
 

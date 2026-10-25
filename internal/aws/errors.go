@@ -35,6 +35,19 @@ func (p Problem) StatusText() string {
 	return "error: " + p.Message()
 }
 
+// Short is the text up to its first ": ", or the whole text when it has none. It
+// is the form the title of the AWS view uses. The detail after the colon (the
+// cause of "AWS unreachable: <cause>", the operation of "access denied:
+// <operation>", the line of the SDK of "<step> failed: <line>") shows in the rows
+// that carry the problem: the single explanatory row of a failed connection, or
+// the Status column of the aws.accounts entries still waiting for credentials
+// when the SSO discovery fails. With no such entry, the short form in the title
+// is all the screen shows of a discovery problem.
+func (p Problem) Short() string {
+	short, _, _ := strings.Cut(p.Text, ": ")
+	return short
+}
+
 // The steps classifyError is told about. They are also the words of the
 // generic message "<step> failed: ...". The last four are the SSO steps: getting
 // the access token of the login and the three calls made with it.
@@ -54,9 +67,9 @@ const (
 	hintNoProvider     = "configure the AWS CLI or set aws.enabled: false"
 	textSSOExpired     = "SSO token expired"
 	hintSSOExpired     = "run aws sso login"
-	textBadKeys        = "AWS credentials expired or invalid"
-	hintBadKeys        = "log in again (for SSO logins, aws sso login and re-export)"
-	textThrottled      = "throttled by AWS, slowing down"
+	textBadKeys        = "credentials expired or invalid"
+	hintBadKeys        = "log in again and re-export the keys"
+	textThrottled      = "throttled by AWS"
 	prefixAccessDenied = "access denied: "
 	prefixUnreachable  = "AWS unreachable: "
 	hintProfileMissing = "check AWS_PROFILE or aws.profile"

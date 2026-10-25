@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials/ssocreds"
 	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
 )
 
@@ -201,7 +202,10 @@ func filesOf(path string) []string {
 // AWS_CONFIG_FILE. Instance metadata is switched off in modeAuto so a weak
 // signal, such as a config file that only holds a region, never makes the
 // program probe 169.254.169.254. The SDK does not retry: the poller does, on
-// its next pass.
+// its next pass. The last two options keep the access token of the login on AWS:
+// for an SSO profile with no exported keys the SDK's own SSO providers build their
+// clients while the config loads, and those follow the endpoint overrides of the
+// SSO services unless these options clear them.
 func (s settings) loadOptions() []func(*config.LoadOptions) error {
 	opts := []func(*config.LoadOptions) error{
 		config.WithSharedConfigFiles(filesOf(s.configFile)),
@@ -220,5 +224,11 @@ func (s settings) loadOptions() []func(*config.LoadOptions) error {
 	if s.mode == modeAuto {
 		opts = append(opts, config.WithEC2IMDSClientEnableState(imds.ClientDisabled))
 	}
-	return append(opts, config.WithRetryMaxAttempts(1))
+	return append(opts,
+		config.WithRetryMaxAttempts(1),
+		config.WithSSOProviderOptions(func(o *ssocreds.Options) { o.Client = ssoClientAtAWS{o.Client} }),
+		config.WithSSOTokenProviderOptions(func(o *ssocreds.SSOTokenProviderOptions) {
+			o.ClientOptions = append(o.ClientOptions, oidcAtAWS)
+		}),
+	)
 }

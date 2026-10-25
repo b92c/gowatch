@@ -35,19 +35,27 @@ func awsRegion(st aws.AWSState) string {
 }
 
 // awsTitle is the title of the services table in the AWS view: the region the
-// SDK resolved, then the connection status. An error shows its hint only when
-// no row can carry it. A problem with the SSO discovery follows the status, so a
-// connected identity with an expired SSO login says why the accounts are old.
-func awsTitle(st aws.AWSState, hasRows bool) string {
-	status := awsStatus(st, hasRows)
-	if st.DiscoveryError.Text != "" {
-		status += "; " + st.DiscoveryError.Message()
+// SDK resolved, then the connection status. The title shows the short form of a
+// problem (its text up to the first colon) and never a hint, so that it fits an
+// 80-column terminal: the full text and the hint show in the Status column of the
+// rows the problem affects ("error: <text> - <hint>") or, when there is no account
+// row, in the single explanatory row (awsExplanation). A problem with the SSO
+// discovery follows a connected status, so a connected identity with an expired
+// SSO login says why the accounts are old; its rows are the aws.accounts entries
+// still waiting for credentials, and with none of them the short form here is
+// all that shows. When the identity itself fails, the title shows that problem
+// only, and the rows keep showing the discovery one.
+func awsTitle(st aws.AWSState) string {
+	status := awsStatus(st)
+	if st.Conn == aws.ConnConnected && st.DiscoveryError.Text != "" {
+		status += "; " + st.DiscoveryError.Short()
 	}
 	return " AWS Cloud Resources (" + tview.Escape(awsRegion(st)) + ") " + tview.Escape(status) + " "
 }
 
-// awsStatus is the status part of the title.
-func awsStatus(st aws.AWSState, hasRows bool) string {
+// awsStatus is the status part of the title. A failed connection shows the short
+// form of its problem and never its hint.
+func awsStatus(st aws.AWSState) string {
 	switch st.Conn {
 	case aws.ConnDisabled:
 		return "disabled"
@@ -56,11 +64,7 @@ func awsStatus(st aws.AWSState, hasRows bool) string {
 	case aws.ConnConnected:
 		return "connected: " + st.Identity.AccountID
 	case aws.ConnError:
-		status := "error: " + st.LastError.Text
-		if !hasRows && st.LastError.Hint != "" {
-			status += " - " + st.LastError.Hint
-		}
-		return status
+		return "error: " + st.LastError.Short()
 	}
 	return "not configured" // ConnNotConfigured and the zero state
 }
@@ -124,7 +128,7 @@ func (d *Dashboard) updateAWSTable(st aws.AWSState) {
 	// its end when it grows, so without this the identity row would leave the
 	// screen once the accounts do not fit.
 	d.servicesTable.ScrollToBeginning()
-	d.servicesTable.SetTitle(awsTitle(st, len(st.Accounts) > 0))
+	d.servicesTable.SetTitle(awsTitle(st))
 
 	for col, header := range awsTableHeaders {
 		d.servicesTable.SetCell(0, col, tview.NewTableCell(header).

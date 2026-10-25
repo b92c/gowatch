@@ -7,8 +7,12 @@ import (
 	"testing"
 	"time"
 
+	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials/ssocreds"
 	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
+	"github.com/aws/aws-sdk-go-v2/service/sso"
+	"github.com/aws/aws-sdk-go-v2/service/ssooidc"
 )
 
 func TestSharedFiles(t *testing.T) {
@@ -330,6 +334,53 @@ func TestLoadOptions(t *testing.T) {
 			t.Errorf("RetryMaxAttempts = %d, want 1", got)
 		}
 	})
+
+	// The SDK builds its own SSO clients while it loads the config of an SSO profile
+	// with no exported keys. The options keep their calls on AWS, as GoWatch's own.
+	t.Run("the SDK's own SSO providers keep their calls on AWS", func(t *testing.T) {
+		lo := applyLoadOptions(t, settings{})
+		if lo.SSOProviderOptions == nil || lo.SSOTokenProviderOptions == nil {
+			t.Fatal("the options of the SDK's SSO credential provider and token provider are not set")
+		}
+
+		// The credential provider: the client it was given is wrapped, and the
+		// options of the caller still reach it.
+		var seen sso.Options
+		provider := ssocreds.Options{Client: roleCredentialsRecorder{seen: &seen}}
+		lo.SSOProviderOptions(&provider)
+		_, err := provider.Client.GetRoleCredentials(context.Background(), &sso.GetRoleCredentialsInput{}, func(o *sso.Options) { o.Region = "kept" })
+		if err != nil {
+			t.Fatalf("GetRoleCredentials() error = %v", err)
+		}
+		if seen.BaseEndpoint != nil || seen.Region != "kept" {
+			t.Errorf("the call went out with the endpoint %q and the region %q, want no endpoint and the region of the caller", awssdk.ToString(seen.BaseEndpoint), seen.Region)
+		}
+
+		// The token provider: the option is added to the ones it has.
+		tokens := ssocreds.SSOTokenProviderOptions{ClientOptions: []func(*ssooidc.Options){func(o *ssooidc.Options) { o.Region = "kept" }}}
+		lo.SSOTokenProviderOptions(&tokens)
+		oidc := ssooidc.Options{BaseEndpoint: awssdk.String("http://127.0.0.1:3")}
+		for _, fn := range tokens.ClientOptions {
+			fn(&oidc)
+		}
+		if len(tokens.ClientOptions) != 2 || oidc.BaseEndpoint != nil || oidc.Region != "kept" {
+			t.Errorf("%d client options leave the endpoint %q and the region %q, want 2, no endpoint and the region that was there",
+				len(tokens.ClientOptions), awssdk.ToString(oidc.BaseEndpoint), oidc.Region)
+		}
+	})
+}
+
+// roleCredentialsRecorder is a GetRoleCredentials client that applies the options
+// of the call to a client that has an endpoint set, and keeps the result.
+type roleCredentialsRecorder struct{ seen *sso.Options }
+
+func (r roleCredentialsRecorder) GetRoleCredentials(_ context.Context, _ *sso.GetRoleCredentialsInput, optFns ...func(*sso.Options)) (*sso.GetRoleCredentialsOutput, error) {
+	options := sso.Options{BaseEndpoint: awssdk.String("http://127.0.0.1:2")}
+	for _, fn := range optFns {
+		fn(&options)
+	}
+	*r.seen = options
+	return &sso.GetRoleCredentialsOutput{}, nil
 }
 
 // This test runs the real SDK loader over files in a temporary home. It makes

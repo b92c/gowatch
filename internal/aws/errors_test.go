@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -26,6 +27,39 @@ func TestProblemTexts(t *testing.T) {
 	}
 	if got := withHint.StatusText(); got != "error: a - b" {
 		t.Errorf("StatusText() = %q, want %q", got, "error: a - b")
+	}
+}
+
+// The title of the AWS view shows a problem up to its first colon: the detail
+// after it (the cause of an unreachable AWS, the operation of a denied call, the
+// line of the SDK of a failure that no rule knows) stays in the rows.
+func TestProblemShort(t *testing.T) {
+	tests := []struct {
+		text string
+		want string
+	}{
+		{text: "AWS unreachable: timeout", want: "AWS unreachable"},
+		{text: "AWS unreachable: DNS lookup failed", want: "AWS unreachable"},
+		{text: "access denied: ListAccounts", want: "access denied"},
+		{text: "ListAccounts failed: " + strings.Repeat("a line of the SDK ", 12), want: "ListAccounts failed"},
+		{text: "GetCallerIdentity failed: operation error STS: GetCallerIdentity, https response error", want: "GetCallerIdentity failed"},
+		{text: "SSO token expired", want: "SSO token expired"},
+		{text: "throttled by AWS", want: "throttled by AWS"},
+		{text: "credentials expired or invalid", want: "credentials expired or invalid"},
+		{text: "no AWS credentials found", want: "no AWS credentials found"},
+		{text: "credential_process failed", want: "credential_process failed"},
+		{text: `AWS profile "x" not found`, want: `AWS profile "x" not found`},
+		{text: "a colon with no space:after it", want: "a colon with no space:after it"},
+		{text: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.text, func(t *testing.T) {
+			p := Problem{Text: tt.text, Hint: "a hint that never shows"}
+
+			if got := p.Short(); got != tt.want {
+				t.Errorf("Short() of %q = %q, want %q", tt.text, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -110,6 +144,60 @@ func TestClassifyError(t *testing.T) {
 			}
 			if strings.Contains(got.Message(), "fake-secret") {
 				t.Errorf("the problem %+v carries a secret that was in the error", got)
+			}
+		})
+	}
+}
+
+// A problem with no account to list is the single row of the AWS view, "<text> -
+// <hint>", and the row has to fit a terminal of 80 columns: the fixed texts of the
+// problems are short enough for it. The row is a table cell, so it has the 80
+// columns less the borders of the panel and of the table, 76 (a title has 78).
+// Every problem is built through classifyError from the error shape of its own
+// test, so the texts are the real ones.
+func TestFixedProblemsFitInOneRow(t *testing.T) {
+	const maxColumns = 76
+	apiError := func(code string) error { return &smithy.GenericAPIError{Code: code, Message: "message"} }
+	tests := []struct {
+		err     error
+		name    string
+		op      string
+		want    Problem
+		sources []awssdk.CredentialSource
+	}{
+		{
+			name: "no provider", op: opAuth, err: errors.New("no EC2 IMDS role found, access disabled"),
+			sources: []awssdk.CredentialSource{awssdk.CredentialSourceIMDS},
+			want:    Problem{Text: textNoProvider, Hint: hintNoProvider},
+		},
+		{name: "SSO token expired", op: opAuth, err: &ssocreds.InvalidTokenError{}, want: Problem{Text: textSSOExpired, Hint: hintSSOExpired}},
+		{name: "bad keys", op: opGetCallerIdentity, err: apiError("ExpiredToken"), want: Problem{Text: textBadKeys, Hint: hintBadKeys}},
+		{name: "throttled", op: opGetCallerIdentity, err: apiError("ThrottlingException"), want: Problem{Text: textThrottled}},
+		{
+			name: "credential_process failed", op: opAuth,
+			err:     fmt.Errorf("failed to refresh cached credentials, %w", &processcreds.ProviderError{Err: io.ErrUnexpectedEOF}),
+			sources: []awssdk.CredentialSource{awssdk.CredentialSourceProfileProcess, awssdk.CredentialSourceProcess},
+			want:    Problem{Text: textProcessFailed, Hint: hintProcessFailed},
+		},
+		{name: "access denied", op: opGetCallerIdentity, err: apiError("AccessDenied"), want: Problem{Text: prefixAccessDenied + opGetCallerIdentity}},
+		{
+			name: "unreachable", op: opGetCallerIdentity, err: &net.DNSError{Err: "no such host", Name: "sts.sa-east-1.amazonaws.com"},
+			want: Problem{Text: prefixUnreachable + "DNS lookup failed"},
+		},
+		{
+			name: "the profile default is not found", op: opLoadConfig, err: config.SharedConfigProfileNotExistError{Profile: "default"},
+			want: Problem{Text: `AWS profile "default" not found`, Hint: hintProfileMissing},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _ := classifyError(tt.op, tt.err, tt.sources)
+
+			if got != tt.want {
+				t.Fatalf("classifyError() = %+v, want %+v: the error shape does not build the fixed problem", got, tt.want)
+			}
+			if n := utf8.RuneCountInString(got.Message()); n > maxColumns {
+				t.Errorf("the row %q has %d columns, want at most %d", got.Message(), n, maxColumns)
 			}
 		})
 	}
