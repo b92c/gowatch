@@ -97,7 +97,7 @@ func oracleEvents() []oracleEvent {
 
 	// Alt is tried on every key the dashboard binds (in the original or since)
 	// and on a few that nothing binds.
-	const withAlt = "qfdDaAwWcClL/?xjkgG "
+	const withAlt = "qfdDaAwWcClL/?xjkgG1234 "
 	for r := rune(0x20); r <= 0x7e; r++ {
 		add(fmt.Sprintf("%q", r), tcell.KeyRune, r, tcell.ModNone)
 		if strings.ContainsRune(withAlt, r) {
@@ -292,6 +292,18 @@ func isExportKeyEvent(name string) bool {
 	return name == "'e'" || name == "'E'" || name == "Alt+'e'" || name == "Alt+'E'"
 }
 
+// isAddedActionKeyEvent tells the events for actions added after commit 155d4ff.
+func isAddedActionKeyEvent(name string) bool {
+	switch name {
+	case "'o'", "'O'", "Alt+'o'", "Alt+'O'",
+		"'i'", "'I'", "Alt+'i'", "Alt+'I'",
+		"'y'", "'Y'", "Alt+'y'", "Alt+'Y'",
+		"'t'", "'T'", "Alt+'t'", "Alt+'T'":
+		return true
+	}
+	return false
+}
+
 func TestDefaultKeymapMatchesTheOriginalHandleInput(t *testing.T) {
 	restoreStyles(t)
 
@@ -321,6 +333,9 @@ func TestDefaultKeymapMatchesTheOriginalHandleInput(t *testing.T) {
 					}
 					if isExportKeyEvent(ev.name) && state.name != "search field focused" {
 						continue // the export keys, checked by TestExportKeysAreTheOtherDifferenceFromTheOriginal
+					}
+					if isAddedActionKeyEvent(ev.name) && state.name != "search field focused" {
+						continue // newer actions added after commit 155d4ff
 					}
 					opts := Options{Layout: layout}
 					resolvedLegacy := seedResolvedAlert(t)

@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/b92c/gowatch/internal/aws"
 	"github.com/b92c/gowatch/internal/config"
 	"github.com/b92c/gowatch/internal/docker"
+	"github.com/b92c/gowatch/internal/notify"
 	"github.com/b92c/gowatch/internal/trace"
 	"github.com/b92c/gowatch/internal/ui"
 	"github.com/moby/moby/client"
@@ -119,15 +121,49 @@ func run(args []string, stdout, stderr io.Writer) int {
 	defer apiClient.Close()
 
 	docker.Configure(docker.Options{
-		LogTailLines:     cfg.Logs.TailLines,
-		HistoryMaxPoints: cfg.History.MaxPoints,
-		AlertRules:       cfg.Alerts.Rules(),
+		LogTailLines:         cfg.Logs.TailLines,
+		HistoryMaxPoints:     cfg.History.MaxPoints,
+		IncludeAllContainers: len(cfg.Filters.Status) > 0,
+		AlertRules:           cfg.Alerts.Rules(),
 		AWS: aws.Options{
 			Region:      cfg.AWS.Region,
 			EndpointURL: cfg.AWS.EndpointURL,
 			Enabled:     cfg.AWS.EnabledOverride(),
 		},
 	})
+
+	dispatcher := notify.NewDispatcher(notify.Options{
+		WebhookURL:        cfg.Alerts.Notifications.WebhookURL,
+		SlackWebhookURL:   cfg.Alerts.Notifications.SlackWebhookURL,
+		DiscordWebhookURL: cfg.Alerts.Notifications.DiscordWebhookURL,
+		TeamsWebhookURL:   cfg.Alerts.Notifications.TeamsWebhookURL,
+		PagerDutyKey:      cfg.Alerts.Notifications.PagerDutyKey,
+		PagerDutyEndpoint: cfg.Alerts.Notifications.PagerDutyEndpoint,
+		SNSEndpointURL:    cfg.Alerts.Notifications.SNSEndpointURL,
+		Desktop:           cfg.Alerts.Notifications.Desktop,
+		SMTP: notify.SMTPOptions{
+			Host:     cfg.Alerts.Notifications.SMTP.Host,
+			Port:     cfg.Alerts.Notifications.SMTP.Port,
+			Username: cfg.Alerts.Notifications.SMTP.Username,
+			Password: cfg.Alerts.Notifications.SMTP.Password,
+			From:     cfg.Alerts.Notifications.SMTP.From,
+			To:       cfg.Alerts.Notifications.SMTP.To,
+		},
+	})
+	if dispatcher.Enabled() {
+		docker.GetGlobalAlertEngine().SetNotifyFunc(dispatcher.Notify)
+	} else {
+		docker.GetGlobalAlertEngine().SetNotifyFunc(nil)
+	}
+
+	if cfg.Tracing.SamplingRate != nil {
+		docker.GetGlobalTraceStore().SetSampleRate(*cfg.Tracing.SamplingRate)
+	}
+	if cfg.Tracing.Exporter.Enabled && cfg.Tracing.Exporter.Endpoint != "" {
+		docker.GetGlobalTraceStore().SetExporter(trace.NewExporterWithFormat(cfg.Tracing.Exporter.Endpoint, cfg.Tracing.Exporter.Format))
+	} else {
+		docker.GetGlobalTraceStore().SetExporter(nil)
+	}
 
 	if cfg.Tracing.OTLPReceiver.Enabled {
 		receiver := trace.NewOTLPReceiver(cfg.Tracing.OTLPReceiver.Address, docker.GetGlobalTraceStore())
@@ -142,8 +178,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}()
 	}
 
-	dashboard := ui.NewDashboardWithOptions(ui.Options{Theme: &theme, Keymap: &keymap, Layout: cfg.Layout})
+	var filterPersistPath string
+	if cfg.Filters.Persist && homeDir != "" {
+		filterPersistPath = filepath.Join(homeDir, ".gowatch", "filter_state.json")
+	}
+
+	dashboard := ui.NewDashboardWithOptions(ui.Options{
+		Theme:             &theme,
+		Keymap:            &keymap,
+		Layout:            cfg.Layout,
+		ShowStatsSummary:  cfg.History.ShowSummary,
+		FilterPersistPath: filterPersistPath,
+	})
 	dashboard.ApplyInitialFilters(cfg.Filters.Search, cfg.Filters.Status, cfg.Filters.MinLogLevel())
+	dashboard.ApplyLabelFilters(cfg.Filters.Labels)
+	dashboard.RestorePersistedFilters()
 
 	go func() {
 		ticker := time.NewTicker(cfg.RefreshInterval)

@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"fmt"
+
 	"github.com/b92c/gowatch/internal/docker"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -63,6 +65,17 @@ func (d *Dashboard) runAction(action Action) {
 		d.app.SetFocus(d.searchField)
 	case ActionCycleLogLevel:
 		d.filterState.CycleMinLogLevel()
+		d.savePersistedFilters()
+	case ActionCycleStatus:
+		d.filterState.CycleStatusFilter()
+		if len(d.filterState.StatusFilter) > 0 && d.filterState.StatusFilter[0] != "running" {
+			docker.Configure(docker.Options{IncludeAllContainers: true})
+		}
+		d.savePersistedFilters()
+	case ActionToggleStatsSummary:
+		d.showStatsSummary = !d.showStatsSummary
+	case ActionToggleTraces:
+		d.toggleTracesModal()
 	case ActionExportLogs:
 		d.exportLogs()
 	case ActionDockerView:
@@ -71,6 +84,8 @@ func (d *Dashboard) runAction(action Action) {
 		d.awsViewMode = true
 	case ActionToggleAlerts:
 		d.toggleAlertsModal()
+	case ActionAcknowledgeAlert:
+		d.acknowledgeSelectedAlert()
 	case ActionClearResolvedAlerts:
 		docker.GetGlobalAlertEngine().ClearResolvedAlerts()
 	case ActionClearFilter:
@@ -92,12 +107,55 @@ func (d *Dashboard) runAction(action Action) {
 func (d *Dashboard) toggleAlertsModal() {
 	d.showingAlertsModal = !d.showingAlertsModal
 	if d.showingAlertsModal {
+		d.showingTracesModal = false
 		d.pages.SwitchToPage("alerts_modal")
 		d.app.SetFocus(d.alertsModal)
 	} else {
 		d.pages.SwitchToPage("dashboard")
 		d.app.SetFocus(d.mainPanel())
 	}
+}
+
+func (d *Dashboard) toggleTracesModal() {
+	d.showingTracesModal = !d.showingTracesModal
+	if d.showingTracesModal {
+		d.showingAlertsModal = false
+		d.pages.SwitchToPage("traces_modal")
+		d.app.SetFocus(d.tracesModal)
+	} else {
+		d.pages.SwitchToPage("dashboard")
+		d.app.SetFocus(d.mainPanel())
+	}
+}
+
+func (d *Dashboard) acknowledgeSelectedAlert() {
+	engine := docker.GetGlobalAlertEngine()
+	var acked bool
+	var label string
+
+	if d.showingAlertsModal {
+		row, _ := d.alertsModal.GetSelection()
+		idx := row - 1
+		if idx >= 0 && idx < len(d.alertRowIDs) {
+			alertID := d.alertRowIDs[idx]
+			engine.AcknowledgeAlert(alertID)
+			acked = true
+			label = alertID
+		}
+	}
+	if !acked {
+		if a, ok := engine.AcknowledgeFirstFiring(); ok {
+			acked = true
+			label = a.RuleID
+		}
+	}
+
+	stats := engine.GetStats()
+	if acked {
+		d.showMessage(d.theme.Tag(d.theme.StatusOK) + tview.Escape(fmt.Sprintf("Alert acknowledged (%s) | Firing:%d Ack:%d Resolved:%d", label, stats.Firing, stats.Acknowledged, stats.Resolved)) + "[-]")
+		return
+	}
+	d.showMessage(d.theme.Tag(d.theme.Muted) + tview.Escape(fmt.Sprintf("No firing alerts to acknowledge | Ack:%d Resolved:%d", stats.Acknowledged, stats.Resolved)) + "[-]")
 }
 
 // clearFilters closes the alerts list when it is open and otherwise clears every
@@ -110,7 +168,14 @@ func (d *Dashboard) clearFilters() {
 		d.app.SetFocus(d.mainPanel())
 		return
 	}
+	if d.showingTracesModal {
+		d.showingTracesModal = false
+		d.pages.SwitchToPage("dashboard")
+		d.app.SetFocus(d.mainPanel())
+		return
+	}
 	d.filterState.Clear()
+	d.savePersistedFilters()
 	d.searchField.SetText("")
 	d.app.SetFocus(d.mainPanel())
 }
@@ -123,6 +188,8 @@ func (d *Dashboard) scroll(action Action) {
 	switch {
 	case d.showingAlertsModal:
 		scrollTable(d.alertsModal, action)
+	case d.showingTracesModal:
+		scrollTextView(d.tracesModal, action)
 	case d.visible.logs:
 		d.scrollLogs(action)
 	}
@@ -134,7 +201,14 @@ func (d *Dashboard) scroll(action Action) {
 // put it. The native keys, End included, do not follow: the logs panel marks the
 // user as scrolling on any key it receives.
 func (d *Dashboard) scrollLogs(action Action) {
-	view := d.logsView
+	if scrollTextView(d.logsView, action) {
+		d.userScrolling = false
+		return
+	}
+	d.userScrolling = true
+}
+
+func scrollTextView(view *tview.TextView, action Action) bool {
 	row, col := view.GetScrollOffset()
 	row = max(row, 0) // negative until the view has been drawn
 	_, _, _, height := view.GetInnerRect()
@@ -153,10 +227,9 @@ func (d *Dashboard) scrollLogs(action Action) {
 		view.ScrollToBeginning()
 	case ActionScrollBottom:
 		view.ScrollToEnd()
-		d.userScrolling = false
-		return
+		return true
 	}
-	d.userScrolling = true
+	return false
 }
 
 // scrollTable moves a table with the key it already understands for the action.

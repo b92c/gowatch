@@ -17,8 +17,32 @@ const (
 
 // AlertsConfig toggles the alerting engine and overrides its built-in rules.
 type AlertsConfig struct {
-	RuleOverrides RuleOverrides `yaml:"rules"`
-	Enabled       bool          `yaml:"enabled"`
+	RuleOverrides RuleOverrides       `yaml:"rules"`
+	Notifications NotificationsConfig `yaml:"notifications"`
+	Enabled       bool                `yaml:"enabled"`
+}
+
+// NotificationsConfig configures alert notification channels.
+type NotificationsConfig struct {
+	WebhookURL        string     `yaml:"webhook_url"`
+	SlackWebhookURL   string     `yaml:"slack_webhook_url"`
+	DiscordWebhookURL string     `yaml:"discord_webhook_url"`
+	TeamsWebhookURL   string     `yaml:"teams_webhook_url"`
+	PagerDutyKey      string     `yaml:"pagerduty_routing_key"`
+	PagerDutyEndpoint string     `yaml:"pagerduty_endpoint"`
+	SNSEndpointURL    string     `yaml:"sns_endpoint_url"`
+	SMTP              SMTPConfig `yaml:"smtp"`
+	Desktop           bool       `yaml:"desktop"`
+}
+
+// SMTPConfig holds email notification settings.
+type SMTPConfig struct {
+	Host     string   `yaml:"host"`
+	Username string   `yaml:"username"`
+	Password string   `yaml:"password"` // #nosec G117 -- user-provided SMTP config field
+	From     string   `yaml:"from"`
+	To       []string `yaml:"to"`
+	Port     int      `yaml:"port"`
 }
 
 // AlertRuleOverride changes fields of a built-in alert rule. A nil pointer or
@@ -28,6 +52,7 @@ type AlertRuleOverride struct {
 	Hysteresis      *float64 `yaml:"hysteresis"`
 	ConsecutiveHits *int     `yaml:"consecutive_hits"`
 	Enabled         *bool    `yaml:"enabled"`
+	Pattern         *string  `yaml:"pattern"`
 	Severity        string   `yaml:"severity"`
 }
 
@@ -74,6 +99,9 @@ func (o AlertRuleOverride) apply(rule alert.AlertRule) alert.AlertRule {
 	if o.ConsecutiveHits != nil {
 		rule.ConsecutiveHits = *o.ConsecutiveHits
 	}
+	if o.Pattern != nil {
+		rule.Pattern = *o.Pattern
+	}
 	if sev, ok := parseSeverity(o.Severity); ok {
 		rule.Severity = sev
 	}
@@ -93,6 +121,9 @@ func (o AlertRuleOverride) merge(in AlertRuleOverride) AlertRuleOverride {
 	}
 	if in.Enabled != nil {
 		o.Enabled = in.Enabled
+	}
+	if in.Pattern != nil {
+		o.Pattern = in.Pattern
 	}
 	if in.Severity != "" {
 		o.Severity = in.Severity

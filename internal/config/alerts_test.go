@@ -42,10 +42,10 @@ func TestAlertsRules(t *testing.T) {
 		if got != want {
 			t.Errorf("HIGH_CPU = %+v, want %+v", got, want)
 		}
-		if len(rules) != 4 {
-			t.Errorf("len(rules) = %d, want 4 (overrides never add or drop rules)", len(rules))
+		if len(rules) != len(alert.DefaultRules()) {
+			t.Errorf("len(rules) = %d, want %d (overrides never add or drop rules)", len(rules), len(alert.DefaultRules()))
 		}
-		for _, id := range []string{"HIGH_MEM", "OOM_KILLED", "CONTAINER_DOWN"} {
+		for _, id := range []string{"HIGH_MEM", "OOM_KILLED", "CONTAINER_DOWN", "HIGH_DISK_IO", "LOG_PATTERN"} {
 			if byID(rules, id) != byID(alert.DefaultRules(), id) {
 				t.Errorf("%s changed although it was not overridden", id)
 			}
@@ -105,7 +105,7 @@ alerts:
 		for _, r := range cfg.Alerts.Rules() {
 			ids = append(ids, r.ID)
 		}
-		if want := []string{"HIGH_CPU", "OOM_KILLED", "CONTAINER_DOWN"}; !reflect.DeepEqual(ids, want) {
+		if want := []string{"HIGH_CPU", "OOM_KILLED", "CONTAINER_DOWN", "HIGH_DISK_IO", "LOG_PATTERN"}; !reflect.DeepEqual(ids, want) {
 			t.Errorf("rule IDs = %v, want %v", ids, want)
 		}
 	})

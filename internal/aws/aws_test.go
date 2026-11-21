@@ -2,6 +2,9 @@ package aws
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -139,5 +142,80 @@ func TestNewAWSClientManagerMatchesZeroOptions(t *testing.T) {
 	legacy, withOptions := NewAWSClientManager().GetState(), NewAWSClientManagerWithOptions(Options{}).GetState()
 	if legacy.Region != withOptions.Region || legacy.EndpointURL != withOptions.EndpointURL || legacy.Enabled != withOptions.Enabled {
 		t.Errorf("NewAWSClientManager() state %+v differs from NewAWSClientManagerWithOptions(Options{}) state %+v", legacy, withOptions)
+	}
+}
+
+func TestAWSCollectAllWithLiveEndpointAndSigV4(t *testing.T) {
+	var authHeaders []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeaders = append(authHeaders, r.Header.Get("Authorization"))
+		switch {
+		case r.Header.Get("X-Amz-Target") == "Logs_20140328.DescribeLogGroups":
+			_, _ = w.Write([]byte(`{"logGroups":[{"logGroupName":"/aws/lambda/api","storedBytes":2048,"retentionInDays":14}]}`))
+		case r.URL.Path == "/2015-03-31/functions":
+			_, _ = w.Write([]byte(`{"Functions":[{"FunctionName":"api-fn","FunctionArn":"arn:aws:lambda:us-east-1:1:function:api-fn","State":"Active","MemorySize":256,"Timeout":10}]}`))
+		case r.URL.Path == "/ServiceGraph":
+			_, _ = w.Write([]byte(`{"Services":[{"Name":"edge","Type":"AWS::ApiGateway","SummaryStatistics":{"OkCount":10,"TotalCount":10,"TotalResponseTime":0.2}}]}`))
+		default:
+			_, _ = w.Write([]byte(`<DescribeStacksResponse><DescribeStacksResult><Stacks><member><StackId>arn:cf:1</StackId><StackName>prod-stack</StackName><StackStatus>CREATE_COMPLETE</StackStatus></member></Stacks></DescribeStacksResult></DescribeStacksResponse>`))
+		}
+	}))
+	defer srv.Close()
+
+	for _, key := range awsEnvKeys {
+		t.Setenv(key, "")
+	}
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+
+	mgr := NewAWSClientManagerWithOptions(Options{
+		Region:      "us-east-1",
+		EndpointURL: srv.URL,
+		Enabled:     boolPtr(true),
+	})
+
+	if err := mgr.CollectAll(context.Background()); err != nil {
+		t.Fatalf("CollectAll() error: %v", err)
+	}
+
+	state := mgr.GetState()
+	if !state.Connected || state.LastError != "" {
+		t.Errorf("expected Connected=true and empty LastError, got %+v", state)
+	}
+	if len(state.Resources) != 4 {
+		t.Fatalf("expected 4 AWS resources, got %d", len(state.Resources))
+	}
+	for i, h := range authHeaders {
+		if !strings.HasPrefix(h, "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/") {
+			t.Errorf("request %d missing SigV4 Authorization header: %q", i, h)
+		}
+	}
+}
+
+func TestAWSCollectAllErrorSetsDisconnectedState(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	for _, key := range awsEnvKeys {
+		t.Setenv(key, "")
+	}
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
+
+	mgr := NewAWSClientManagerWithOptions(Options{
+		Region:      "us-east-1",
+		EndpointURL: srv.URL,
+		Enabled:     boolPtr(true),
+	})
+
+	err := mgr.CollectAll(context.Background())
+	if err == nil {
+		t.Fatal("expected CollectAll to return error on HTTP 403")
+	}
+	state := mgr.GetState()
+	if state.Connected || state.LastError == "" {
+		t.Errorf("expected Connected=false and non-empty LastError, got %+v", state)
 	}
 }

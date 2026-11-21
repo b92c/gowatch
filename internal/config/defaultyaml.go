@@ -43,6 +43,7 @@ func DefaultYAML() []byte {
 
 	b.WriteString("\nhistory:\n  # Samples kept per container for the CPU and memory sparklines (10-3600).\n")
 	fmt.Fprintf(&b, "  max_points: %d\n", def.History.MaxPoints)
+	fmt.Fprintf(&b, "  show_summary: %t   # true appends min/max/avg to the CPU and Memory columns\n", def.History.ShowSummary)
 
 	b.WriteString(`
 # Filters applied when GoWatch starts. Esc in the dashboard clears all of them.
@@ -50,6 +51,8 @@ filters:
   search: ""          # matches service name, container ID or image; also shows the log lines that contain it
   min_log_level: ""   # info | warn | error (empty shows every level)
   status: []          # container states to show, for example [running, exited]
+  # labels: {}        # docker label key/value filters, for example {env: prod}
+  persist: false      # true saves and restores active filters in ~/.gowatch/filter_state.json
 
 alerts:
 `)
@@ -66,12 +69,37 @@ alerts:
 		fmt.Fprintf(&b, "      # hysteresis: %s\n", strconv.FormatFloat(rule.HysteresisThreshold, 'f', -1, 64))
 		fmt.Fprintf(&b, "      consecutive_hits: %d\n", rule.ConsecutiveHits)
 		fmt.Fprintf(&b, "      severity: %s\n", severityName(rule.Severity))
+		if rule.Metric == "log_pattern" {
+			b.WriteString("      # pattern: \"\"\n")
+		}
 		b.WriteString("      enabled: true\n")
 	}
+	b.WriteString(`  notifications:
+    desktop: false
+    # webhook_url: ""
+    # slack_webhook_url: ""
+    # discord_webhook_url: ""
+    # teams_webhook_url: ""
+    # pagerduty_routing_key: ""
+    # pagerduty_endpoint: ""
+    # sns_endpoint_url: ""
+    # smtp:
+    #   host: ""
+    #   port: 587
+    #   username: ""
+    #   password: ""
+    #   from: ""
+    #   to: []
+`)
 
-	b.WriteString("\ntracing:\n  otlp_receiver:\n")
+	b.WriteString("\ntracing:\n  # sampling_rate: 1.0  # deterministic trace sampling ratio (0.0 to 1.0)\n  otlp_receiver:\n")
 	fmt.Fprintf(&b, "    enabled: %t\n", def.Tracing.OTLPReceiver.Enabled)
 	fmt.Fprintf(&b, "    address: %q   # accepts OTLP/HTTP JSON on /v1/traces\n", def.Tracing.OTLPReceiver.Address)
+	b.WriteString(`  # exporter:
+  #   enabled: false
+  #   format: otlp        # otlp | jaeger | gowatch
+  #   endpoint: ""
+`)
 
 	b.WriteString(`
 aws:
@@ -143,11 +171,15 @@ layout:
 #   quit                   q         quit GoWatch
 #   docker_view            d, D      show the Docker services
 #   aws_view               a, A      show the AWS resources
+#   toggle_stats_summary   i, I      show or hide CPU/memory min/max/avg
+#   toggle_traces          t, T      show or hide the traces flamegraph
 #   search                 /, f      focus the search field (matches services and log text)
 #   cycle_log_level        l, L      cycle the minimum log level
+#   cycle_status           o, O      cycle the container status filter
 #   export_logs            e, E      export the shown logs to JSON
 #   clear_filter           esc       clear all filters (closes the alerts list first)
 #   toggle_alerts          w, W      show or hide the alerts list
+#   acknowledge_alert      y, Y      acknowledge the selected alert
 #   clear_resolved_alerts  c, C      clear the resolved alerts
 #   scroll_up              up        scroll up a line
 #   scroll_down            down      scroll down a line

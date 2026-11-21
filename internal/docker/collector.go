@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"runtime"
 	"strconv"
 	"sync"
@@ -24,6 +25,8 @@ type ContainerLog struct {
 type FormattedLog struct {
 	Service string
 	Line    string
+	TraceID string
+	SpanID  string
 	Level   metrics.LogLevel
 }
 
@@ -40,21 +43,23 @@ var (
 	globalAlertEngine = alert.NewAlertEngine(nil)
 	statsMutex        sync.RWMutex
 
-	// settingsMutex guards globalAWSManager and the two values below, which
+	// settingsMutex guards globalAWSManager and the values below, which
 	// Configure may replace.
-	settingsMutex    sync.RWMutex
-	logTailLines     = defaultLogTailLines
-	historyMaxPoints = metrics.MaxHistoryPoints
+	settingsMutex        sync.RWMutex
+	logTailLines         = defaultLogTailLines
+	historyMaxPoints     = metrics.MaxHistoryPoints
+	includeAllContainers bool
 )
 
 // Options tunes the collector. A zero value keeps the built-in default, so
 // the zero Options changes nothing. AlertRules is the exception: nil keeps the
 // default rules, while an empty non-nil slice installs no rules at all.
 type Options struct {
-	AWS              aws.Options
-	AlertRules       []alert.AlertRule
-	LogTailLines     int
-	HistoryMaxPoints int
+	AWS                  aws.Options
+	AlertRules           []alert.AlertRule
+	LogTailLines         int
+	HistoryMaxPoints     int
+	IncludeAllContainers bool
 }
 
 // Configure applies o to the collector. Call it once at startup, before the
@@ -67,6 +72,9 @@ func Configure(o Options) {
 	if o.HistoryMaxPoints > 0 {
 		historyMaxPoints = o.HistoryMaxPoints
 	}
+	if o.IncludeAllContainers {
+		includeAllContainers = true
+	}
 	if o.AWS != (aws.Options{}) {
 		globalAWSManager = aws.NewAWSClientManagerWithOptions(o.AWS)
 	}
@@ -75,6 +83,12 @@ func Configure(o Options) {
 	if o.AlertRules != nil {
 		globalAlertEngine.SetRules(o.AlertRules)
 	}
+}
+
+func currentIncludeAllContainers() bool {
+	settingsMutex.RLock()
+	defer settingsMutex.RUnlock()
+	return includeAllContainers
 }
 
 func currentLogTailLines() int {
@@ -220,6 +234,7 @@ type Containers struct {
 }
 
 type Container struct {
+	Labels         map[string]string
 	WorkingDir     string
 	SOVersion      string
 	Status         string
@@ -249,7 +264,7 @@ type Container struct {
 }
 
 func WatchContainers(ctx context.Context, apiClient *client.Client) (Containers, error) {
-	cntList, err := apiClient.ContainerList(ctx, client.ContainerListOptions{})
+	cntList, err := apiClient.ContainerList(ctx, client.ContainerListOptions{All: currentIncludeAllContainers()})
 	if err != nil {
 		return Containers{}, err
 	}
@@ -262,8 +277,13 @@ func WatchContainers(ctx context.Context, apiClient *client.Client) (Containers,
 		stat := getContainerStats(ctx, apiClient, c.ID)
 		totalMemUsed += stat.MemUsage
 		logs := getContainerLogs(ctx, apiClient, c.ID)
+		var labels map[string]string
+		if len(c.Labels) > 0 {
+			labels = maps.Clone(c.Labels)
+		}
 		containers.C = append(containers.C, Container{
-			ID: c.ID, Image: c.Image, Status: c.Status, State: string(c.State),
+			Labels: labels,
+			ID:     c.ID, Image: c.Image, Status: c.Status, State: string(c.State),
 			Command: c.Command, DependsOn: c.Labels["com.docker.compose.depends_on"],
 			Service:    c.Labels["com.docker.compose.service"],
 			SOVersion:  c.Labels["org.opencontainers.image.ref.name"] + " " + c.Labels["org.opencontainers.image.version"],
@@ -287,12 +307,15 @@ func WatchContainers(ctx context.Context, apiClient *client.Client) (Containers,
 		})
 
 		evalData = append(evalData, alert.ContainerEvaluatorData{
-			ID:         c.ID,
-			Service:    c.Labels["com.docker.compose.service"],
-			State:      string(c.State),
-			CPUPercent: stat.CPUPercent,
-			MemUsage:   stat.MemUsage,
-			OOMEvents:  stat.OOMEvents,
+			ID:             c.ID,
+			Service:        c.Labels["com.docker.compose.service"],
+			State:          string(c.State),
+			Logs:           logs,
+			CPUPercent:     stat.CPUPercent,
+			MemUsage:       stat.MemUsage,
+			OOMEvents:      stat.OOMEvents,
+			DiskReadBytes:  stat.DiskReadBytes,
+			DiskWriteBytes: stat.DiskWriteBytes,
 		})
 	}
 	containers.Host = getHostInfo(ctx, apiClient, totalMemUsed)
@@ -308,16 +331,26 @@ func WatchContainers(ctx context.Context, apiClient *client.Client) (Containers,
 		}
 		for _, line := range c.Log {
 			level := ParseLogLevel(line)
-			globalCorrelator.ProcessLogLine(serviceName, line)
+			var traceID, spanID string
+			if sp := globalCorrelator.ProcessLogLine(serviceName, line); sp != nil {
+				traceID = sp.TraceID
+				spanID = sp.SpanID
+			}
 			containers.FlatLogs = append(containers.FlatLogs, FormattedLog{
 				Service: serviceName,
 				Line:    line,
+				TraceID: traceID,
+				SpanID:  spanID,
 				Level:   level,
 			})
 		}
 	}
 	containers.Traces = globalTraceStore.GetTraces()
-	containers.AWS = GetGlobalAWSManager().GetState()
+	awsMgr := GetGlobalAWSManager()
+	if awsMgr.GetState().Enabled {
+		_ = awsMgr.CollectAll(ctx)
+	}
+	containers.AWS = awsMgr.GetState()
 	containers.Alerts = globalAlertEngine.Evaluate(evalData, containers.Host)
 
 	return containers, nil

@@ -50,3 +50,21 @@ func TestFormatStatsSummary(t *testing.T) {
 		t.Errorf("expected %s, got %s", expected, res)
 	}
 }
+
+func TestFormatByteStatsSummaryMB(t *testing.T) {
+	const mb = 1024.0 * 1024.0
+	points := []MetricPoint{
+		{Timestamp: time.Now(), Value: 10.0 * mb},
+		{Timestamp: time.Now(), Value: 20.0 * mb},
+	}
+
+	got := FormatByteStatsSummaryMB(points)
+	want := "min:10.0MB max:20.0MB avg:15.0MB"
+	if got != want {
+		t.Errorf("FormatByteStatsSummaryMB() = %q, want %q", got, want)
+	}
+
+	if gotEmpty := FormatByteStatsSummaryMB(nil); gotEmpty != "min:0.0MB max:0.0MB avg:0.0MB" {
+		t.Errorf("FormatByteStatsSummaryMB(nil) = %q, want all zeros", gotEmpty)
+	}
+}

@@ -23,11 +23,15 @@ const (
 	ActionQuit                Action = "quit"
 	ActionDockerView          Action = "docker_view"
 	ActionAWSView             Action = "aws_view"
+	ActionToggleStatsSummary  Action = "toggle_stats_summary"
+	ActionToggleTraces        Action = "toggle_traces"
 	ActionSearch              Action = "search"
 	ActionCycleLogLevel       Action = "cycle_log_level"
+	ActionCycleStatus         Action = "cycle_status"
 	ActionExportLogs          Action = "export_logs"
 	ActionClearFilter         Action = "clear_filter"
 	ActionToggleAlerts        Action = "toggle_alerts"
+	ActionAcknowledgeAlert    Action = "acknowledge_alert"
 	ActionClearResolvedAlerts Action = "clear_resolved_alerts"
 	ActionScrollUp            Action = "scroll_up"
 	ActionScrollDown          Action = "scroll_down"
@@ -60,11 +64,15 @@ var actionTable = []actionInfo{
 	{action: ActionQuit, group: groupGeneral, description: "Quit GoWatch"},
 	{action: ActionDockerView, group: groupViews, description: "Show the Docker services"},
 	{action: ActionAWSView, group: groupViews, description: "Show the AWS resources"},
+	{action: ActionToggleStatsSummary, group: groupViews, description: "Show or hide CPU/memory min/max/avg"},
+	{action: ActionToggleTraces, group: groupViews, description: "Show or hide the traces flamegraph"},
 	{action: ActionSearch, group: groupFilters, description: "Search by service, ID, image or log text"},
 	{action: ActionCycleLogLevel, group: groupFilters, description: "Cycle the minimum log level"},
+	{action: ActionCycleStatus, group: groupFilters, description: "Cycle the container status filter"},
 	{action: ActionExportLogs, group: groupFilters, description: "Export the shown logs to JSON"},
 	{action: ActionClearFilter, group: groupFilters, description: "Clear all filters (closes the alerts list first)"},
 	{action: ActionToggleAlerts, group: groupAlerts, description: "Show or hide the alerts list"},
+	{action: ActionAcknowledgeAlert, group: groupAlerts, description: "Acknowledge the selected alert"},
 	{action: ActionClearResolvedAlerts, group: groupAlerts, description: "Clear the resolved alerts"},
 	{action: ActionScrollUp, group: groupNavigation, description: "Scroll up one line"},
 	{action: ActionScrollDown, group: groupNavigation, description: "Scroll down one line"},
@@ -356,11 +364,15 @@ var defaultPreset = map[Action][]string{
 	ActionQuit:                {"q"},
 	ActionDockerView:          {"d", "D"},
 	ActionAWSView:             {"a", "A"},
+	ActionToggleStatsSummary:  {"i", "I"},
+	ActionToggleTraces:        {"t", "T"},
 	ActionSearch:              {"/", "f"},
 	ActionCycleLogLevel:       {"l", "L"},
+	ActionCycleStatus:         {"o", "O"},
 	ActionExportLogs:          {"e", "E"},
 	ActionClearFilter:         {"esc"},
 	ActionToggleAlerts:        {"w", "W"},
+	ActionAcknowledgeAlert:    {"y", "Y"},
 	ActionClearResolvedAlerts: {"c", "C"},
 	ActionScrollUp:            {"up"},
 	ActionScrollDown:          {"down"},

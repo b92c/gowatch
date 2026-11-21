@@ -24,9 +24,19 @@ type AlertRule struct {
 	Metric              string
 	Severity            Severity
 	Description         string
+	Pattern             string
 	Threshold           float64
 	HysteresisThreshold float64
 	ConsecutiveHits     int
+}
+
+type AlertStats struct {
+	TotalFired   int
+	Firing       int
+	Acknowledged int
+	Resolved     int
+	Critical     int
+	Warning      int
 }
 
 type Alert struct {
@@ -79,6 +89,25 @@ func DefaultRules() []AlertRule {
 			ConsecutiveHits:     1,
 			Severity:            SeverityCritical,
 			Description:         "Container is in unhealthy/restarting/dead state",
+		},
+		{
+			ID:                  "HIGH_DISK_IO",
+			Metric:              "disk_io_mb",
+			Threshold:           1024.0,
+			HysteresisThreshold: 900.0,
+			ConsecutiveHits:     3,
+			Severity:            SeverityWarning,
+			Description:         "Disk I/O exceeds 1024MB",
+		},
+		{
+			ID:                  "LOG_PATTERN",
+			Metric:              "log_pattern",
+			Threshold:           1.0,
+			HysteresisThreshold: 0.0,
+			ConsecutiveHits:     1,
+			Severity:            SeverityWarning,
+			Pattern:             "",
+			Description:         "Log pattern matched",
 		},
 	}
 }

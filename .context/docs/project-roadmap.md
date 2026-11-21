@@ -36,11 +36,11 @@ Status checked against the code in October 2026. Legend:
 
 **By phase** (the gaps are listed under each phase and item below)
 
-- Phase 1 🟡: P1.2 and P1.4 are done; P1.1 and P1.3 have gaps (no min/max/average display, no status or label filter while running).
+- Phase 1 ✅: done (P1.1 status/label filtering + persistence, P1.2 extended metrics, P1.3 `min/max/avg` summary toggle, P1.4 log search & JSON export).
 - Phase 2 ✅: done, except the Emacs keybinding mode.
-- Phase 3 🟡: P3.1 is done; traces from log lines and from the optional OTLP receiver show in the System Resources panel. There is no flamegraph, no log-to-span link and nothing calls the exporter.
-- Phase 4 🟡 (structure only): the AWS code returns fixed data and nothing calls it, so the AWS view is always empty.
-- Phase 5 🟡: P5.1 works in part (CPU, memory, OOM and restarting containers) and the alerts list works; P5.2 has not started; P5.3 cannot acknowledge alerts or show statistics.
+- Phase 3 ✅: done (P3.1 OTLP receiver & log correlator, P3.2 dedicated traces flamegraph modal & log-to-span linking, P3.3 OTLP/Jaeger/GoWatch exporters & deterministic sampling).
+- Phase 4 ✅: done (P4.1–P4.4 AWS SigV4 HTTP client, live CloudWatch/Lambda/X-Ray/CloudFormation collectors, `CollectAll` integration, and connection/error status in AWS view).
+- Phase 5 ✅: done (P5.1 CPU, memory, OOM, container state, disk I/O & log pattern rules; P5.2 async notification dispatcher for webhooks/Slack/Discord/Teams/PagerDuty/SNS/SMTP/desktop; P5.3 UI alert acknowledgement & session stats).
 - Phases 6 and 7 ⚪: not started.
 
 ---
@@ -271,5 +271,64 @@ None of these libraries is a direct dependency yet. The sparklines are drawn by 
 
 ---
 
-**Last Updated**: October 2026
+## Gap-Closure Implementation Plan (Phases 1–5)
+
+This section defines the 4-stage execution plan to close all remaining gaps across Phases 1 through 5 while preserving the codebase's architectural invariants.
+
+### Cross-Cutting Invariants
+
+1. **Dark theme & default layout parity (`internal/ui/legacy_look_test.go`)**: The default dashboard (with zero `Options{}` and no config flags) must keep its exact texts, titles, 12-column `Docker Services` table, `System Resources` panel, and `alertsModal` layout/colors. New views must live in dedicated `tview.Pages` modals or be toggled via explicit actions/configuration.
+2. **Keyboard oracle (`internal/ui/input_oracle_test.go`)**: Every new keyboard shortcut must be registered as an `Action` in `internal/ui/keymap.go`, documented in `internal/config/defaultyaml.go` (`TestPrintedDefaultConfigCoversKeybindings`), fit within 80 columns in the help page (`TestHelpPageFitsEightyColumns`), and be explicitly accounted for in the oracle test suite (following the pattern of `?` and `e`/`E`).
+3. **Untrusted working-directory config (`internal/config/untrusted.go`)**: Any setting that sends data over the network (trace exporters, alert webhooks, SMTP, SNS/SQS) or writes state outside the standard flow must be rejected when set in `./gowatch.yaml` and accepted only from `~/.gowatch/config.yaml` or `--config`.
+4. **Leaf configuration package (`internal/config`)**: Must only import the standard library, `go.yaml.in/yaml/v3`, `internal/alert`, and `pkg/metrics`.
+
+### Stage 1 — Phase 1: Advanced Filtering (P1.1) & Historical Summary `min/max/avg` (P1.3)
+
+- **P1.1 — Status & Docker label filtering + optional persistence**:
+  - `internal/docker/collector.go`: Add `Labels map[string]string` to `docker.Container` (populated from `c.Labels`) and `IncludeAllContainers bool` to `docker.Options` so non-running containers can be inspected when status filters or container-state rules require them.
+  - `internal/filter/filter.go`: Generalize `matchesStatusAndLabels` to match any key/value pair in `c.Labels`. Support inline query qualifiers in the search field (`status:<state>`, `label:<key>=<val>`, `label:<key>`) alongside free-text search without changing the `"name, id or image..."` placeholder. Add `CycleStatusFilter()` and `ActionCycleStatus` (`s`/`S`).
+  - `internal/config/`: Add `filters.labels` (`map[string]string`) and `filters.persist` (`bool`, disallowed in `./gowatch.yaml`) to save/restore active filters in `~/.gowatch/filter_state.yaml`.
+- **P1.3 — `min/max/avg` CPU & memory display**:
+  - `pkg/metrics/types.go`: Add `FormatByteStatsSummaryMB(values []MetricPoint) string` alongside `FormatStatsSummary`.
+  - `internal/ui/dashboard.go` & `keymap.go`: Add `showStatsSummary bool` (configured via `history.show_summary` and toggled via `ActionToggleStatsSummary` on `m`/`M`) to append `min/max/avg` summaries to the `CPU %` and `Memory` cells when enabled.
+
+### Stage 2 — Phase 5: Extended Alert Rules (P5.1), Management (P5.3) & Notifications (P5.2)
+
+- **P5.1 — Disk I/O thresholds & log pattern matching**:
+  - `internal/alert/types.go` & `engine.go`: Extend `ContainerEvaluatorData` with `DiskReadBytes`, `DiskWriteBytes`, and `Logs []string`. Add `Pattern string` to `AlertRule` and support `disk_io_mb` (`HIGH_DISK_IO`) and `log_pattern` (`LOG_PATTERN`) metrics in `evaluateRule`, with overrides under `alerts.rules`.
+- **P5.3 — Acknowledge/resolve actions & alert statistics**:
+  - `internal/alert/engine.go`: Add `ResolveAlert(alertID string)` and `GetStats() AlertStats` (session counts by status, severity, and rule) alongside the existing `AcknowledgeAlert(alertID string)`.
+  - `internal/ui/dashboard.go` & `input.go`: Track displayed alert IDs in `alertsModal` and wire `ActionAcknowledgeAlert` (`u`/`U`) to acknowledge the selected firing alert and show confirmation via `showMessage`.
+- **P5.2 — Notification channels (`internal/notify`)**:
+  - Create `internal/notify` with an asynchronous `Dispatcher` (deduplicating on `Alert.ID + Alert.Status` transitions) and drivers for generic Webhooks, Slack/Discord/Teams incoming webhooks, SMTP email, PagerDuty/SNS/SQS endpoints, and desktop notifications (`osascript` / `notify-send` / terminal bell).
+  - `internal/config/untrusted.go`: Reject external notification destinations in `./gowatch.yaml`.
+
+### Stage 3 — Phase 3: Trace Visualization (P3.2) & Trace Export/Sampling (P3.3)
+
+- **P3.2 — Dedicated traces modal, ASCII flamegraph & log-to-span linking**:
+  - `internal/docker/collector.go`: Add `TraceID` and `SpanID` to `FormattedLog` from `globalCorrelator.ProcessLogLine`.
+  - `internal/filter/filter.go`: Support `trace:<trace_id>` qualifier in search to filter logs linked to a trace.
+  - `internal/ui/traces.go`: Add `"traces_modal"` page (`ActionToggleTraces` on `t`/`T`) displaying active traces, a hierarchical ASCII flamegraph/waterfall (`ParentSpanID` → `SpanID`) with proportional duration bars, and correlated log lines (`Enter` jumps to filtered logs for that trace).
+- **P3.3 — OTLP/Jaeger exporters & sampling configuration**:
+  - `internal/trace/types.go` & `exporter.go`: Add deterministic `SampleRate` (`0.0`..`1.0` by `TraceID` hash) to `TraceStore`, and extend `Exporter` with asynchronous batching and `otlp` (OTLP/HTTP JSON `/v1/traces`), `jaeger`, and `gowatch` formats.
+  - `internal/config/`: Add `tracing.sampling_rate` and `tracing.exporter` (`enabled`, `format`, `endpoint`), rejecting `tracing.exporter` in `./gowatch.yaml`.
+
+### Stage 4 — Phase 4: Functional AWS Serverless Integration (P4.1–P4.4)
+
+- **P4.1–P4.4 — AWS SigV4 HTTP client & real collectors (`internal/aws/`)**:
+  - `internal/aws/client.go`: Implement standard-library AWS Signature V4 signing (`crypto/hmac`, `crypto/sha256`, `net/http`) reading standard AWS environment variables and `~/.aws/credentials` with `EndpointURL` support (AWS and LocalStack), behind a mockable transport interface. Add `CollectAll(ctx context.Context)` to run the CloudWatch, Lambda, X-Ray, and CloudFormation collectors when `Enabled == true` and update `SetResources` / `SetConnected`.
+  - `internal/aws/cloudwatch.go`, `lambda.go`, `xray.go`, `cloudformation.go`: Replace static sample data with real API calls (`DescribeLogGroups`/`FilterLogEvents`/`GetMetricData`, `ListFunctions`, `GetServiceGraph`/`GetTraceSummaries`, `DescribeStacks`/`ListStackResources`).
+  - `internal/docker/collector.go` & `internal/ui/dashboard.go`: Trigger `globalAWSManager.CollectAll(ctx)` when enabled and surface `Connected` / `LastError` status in the AWS view (`a`) when disconnected or empty.
+
+### Quality Gates per Stage
+
+Every stage must pass before moving to the next:
+1. `make field-fix`
+2. `make lint` (`fmt-check`, `vet`, `mod-check`, `field-check`, `go-sec`)
+3. `make test` (`go test -race -coverpkg=./... -v -coverprofile=coverage.out ./...`)
+4. Documentation updates in `README.md`, `.context/docs/project-roadmap.md`, and `.context/agents/active-memory.md`.
+
+---
+
+**Last Updated**: November 2026
 **Next Review**: January 2027

@@ -25,6 +25,7 @@ type Dashboard struct {
 	daemonErrView      *tview.TextView
 	servicesTable      *tview.Table
 	alertsModal        *tview.Table
+	tracesModal        *tview.TextView
 	grid               *tview.Grid
 	searchField        *tview.InputField
 	logsView           *tview.TextView
@@ -33,7 +34,9 @@ type Dashboard struct {
 	helpBar            *tview.TextView
 	errorHelpBar       *tview.TextView
 	helpTable          *tview.Table
+	filterPersistPath  string
 	serviceOrder       []string
+	alertRowIDs        []string
 	shown              shownSnapshot
 	filterState        filter.FilterState
 	theme              Theme
@@ -47,7 +50,9 @@ type Dashboard struct {
 	firstRender        bool
 	awsViewMode        bool
 	showingAlertsModal bool
+	showingTracesModal bool
 	showingHelp        bool
+	showStatsSummary   bool
 }
 
 // Options customizes a Dashboard. The zero value gives the built-in look and
@@ -59,9 +64,13 @@ type Options struct {
 	// Keymap says which key runs which action, as built by BuildKeymap; nil
 	// means the default keymap.
 	Keymap *Keymap
+	// FilterPersistPath, when non-empty, stores and restores active filters.
+	FilterPersistPath string
 	// Layout says which panels are shown and their relative heights. It is
 	// expected to have passed config.Validate.
 	Layout config.LayoutConfig
+	// ShowStatsSummary appends min/max/avg to CPU and Memory cells.
+	ShowStatsSummary bool
 }
 
 // NewDashboard creates a dashboard with the built-in look.
@@ -118,6 +127,14 @@ func NewDashboardWithOptions(opts Options) *Dashboard {
 		SetTitleAlign(tview.AlignCenter).
 		SetBorderColor(theme.StatusError)
 
+	tracesModal := tview.NewTextView().
+		SetDynamicColors(true).
+		SetScrollable(true)
+	tracesModal.SetBorder(true).
+		SetTitle(" Distributed Traces & Flamegraph (Esc/t Close) ").
+		SetTitleAlign(tview.AlignCenter).
+		SetBorderColor(theme.Accent)
+
 	searchField := tview.NewInputField().
 		SetLabel("Search: ").
 		SetPlaceholder("name, id or image...").
@@ -158,6 +175,7 @@ func NewDashboardWithOptions(opts Options) *Dashboard {
 	pages := tview.NewPages().
 		AddPage("dashboard", grid, true, true).
 		AddPage("alerts_modal", alertsModal, true, false).
+		AddPage("traces_modal", tracesModal, true, false).
 		AddPage("error", errorGrid, true, false).
 		AddPage(helpPage, helpTable, true, false)
 
@@ -165,24 +183,27 @@ func NewDashboardWithOptions(opts Options) *Dashboard {
 	app.EnableMouse(true)
 
 	dash := &Dashboard{
-		app:           app,
-		theme:         theme,
-		keymap:        keymap,
-		visible:       visibilityOf(opts.Layout),
-		servicesTable: servicesTable,
-		alertsModal:   alertsModal,
-		helpTable:     helpTable,
-		logsView:      logsView,
-		resourcesView: resourcesView,
-		helpBar:       helpBar,
-		errorHelpBar:  errorHelpBar,
-		grid:          grid,
-		pages:         pages,
-		daemonErrView: daemonErrView,
-		searchField:   searchField,
-		filterState:   filter.NewFilterState(),
-		userScrolling: false,
-		firstRender:   true,
+		app:               app,
+		theme:             theme,
+		keymap:            keymap,
+		visible:           visibilityOf(opts.Layout),
+		showStatsSummary:  opts.ShowStatsSummary,
+		filterPersistPath: opts.FilterPersistPath,
+		servicesTable:     servicesTable,
+		alertsModal:       alertsModal,
+		tracesModal:       tracesModal,
+		helpTable:         helpTable,
+		logsView:          logsView,
+		resourcesView:     resourcesView,
+		helpBar:           helpBar,
+		errorHelpBar:      errorHelpBar,
+		grid:              grid,
+		pages:             pages,
+		daemonErrView:     daemonErrView,
+		searchField:       searchField,
+		filterState:       filter.NewFilterState(),
+		userScrolling:     false,
+		firstRender:       true,
 	}
 	app.SetFocus(dash.mainPanel())
 
@@ -211,6 +232,31 @@ func (d *Dashboard) ApplyInitialFilters(search string, status []string, minLogLe
 	d.searchField.SetText(d.filterState.SearchText)
 }
 
+// ApplyLabelFilters sets initial Docker label filters on the dashboard.
+func (d *Dashboard) ApplyLabelFilters(labels map[string]string) {
+	d.filterState.SetLabelFilters(labels)
+}
+
+// RestorePersistedFilters loads previously saved filters when persistence is enabled.
+func (d *Dashboard) RestorePersistedFilters() {
+	if d.filterPersistPath == "" {
+		return
+	}
+	loaded, err := filter.LoadFilterState(d.filterPersistPath)
+	if err != nil || !loaded.Active {
+		return
+	}
+	d.filterState = loaded
+	d.searchField.SetText(d.filterState.SearchText)
+}
+
+func (d *Dashboard) savePersistedFilters() {
+	if d.filterPersistPath == "" {
+		return
+	}
+	_ = filter.SaveFilterState(d.filterPersistPath, d.filterState)
+}
+
 func (d *Dashboard) Update(containers docker.Containers) {
 	fs := d.filterState // one copy for the filtering and for what the export records
 	filtered := filter.FilterContainers(containers, fs)
@@ -227,6 +273,7 @@ func (d *Dashboard) Update(containers docker.Containers) {
 		d.updateLogsView(filtered)
 	}
 	d.updateAlertsModal(containers.Alerts)
+	d.tracesModal.SetText(renderTracesText(d.theme, containers.Traces, containers.FlatLogs))
 }
 
 func (d *Dashboard) SetupInputCapture() {
@@ -237,12 +284,14 @@ func (d *Dashboard) SetupInputCapture() {
 	d.searchField.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEscape {
 			d.filterState.Clear()
+			d.savePersistedFilters()
 			d.searchField.SetText("")
 			d.app.SetFocus(d.mainPanel())
 			return nil
 		}
 		if event.Key() == tcell.KeyEnter {
 			d.filterState.SetSearch(d.searchField.GetText())
+			d.savePersistedFilters()
 			d.app.SetFocus(d.mainPanel())
 			return nil
 		}
@@ -263,6 +312,19 @@ func (d *Dashboard) updateServicesTable(containers docker.Containers) {
 				SetAlign(tview.AlignCenter).
 				SetSelectable(false)
 			d.servicesTable.SetCell(0, i, cell)
+		}
+
+		if len(containers.AWS.Resources) == 0 {
+			statusText := "No AWS resources found"
+			statusColor := t.Muted
+			if !containers.AWS.Enabled {
+				statusText = "AWS integration disabled (set aws.enabled: true or AWS_* env vars)"
+			} else if containers.AWS.LastError != "" {
+				statusText = "AWS error: " + containers.AWS.LastError
+				statusColor = t.StatusError
+			}
+			d.servicesTable.SetCell(1, 0, tview.NewTableCell(statusText).SetTextColor(statusColor).SetAlign(tview.AlignLeft))
+			return
 		}
 
 		for row, r := range containers.AWS.Resources {
@@ -332,6 +394,10 @@ func (d *Dashboard) updateServicesTable(containers docker.Containers) {
 		memMB := fmt.Sprintf("%.2f MB", float64(c.MemUsage)/1024/1024)
 		cpuStr := fmt.Sprintf("%s %.2f%%", cpuSpark, c.CPUPercent)
 		memStr := fmt.Sprintf("%s %s", memSpark, memMB)
+		if d.showStatsSummary {
+			cpuStr += " (" + metrics.FormatStatsSummary(c.CPUHistory, "%") + ")"
+			memStr += " (" + metrics.FormatByteStatsSummaryMB(c.MemHistory) + ")"
+		}
 
 		netBytes := fmt.Sprintf("%s/%s", formatBytes(c.NetRxBytes), formatBytes(c.NetTxBytes))
 		netPackets := fmt.Sprintf("%d/%d", c.NetRxPackets, c.NetTxPackets)
@@ -467,6 +533,7 @@ func (d *Dashboard) updateResourcesView(host metrics.HostInfo, containers []dock
 func (d *Dashboard) updateAlertsModal(alerts []alert.Alert) {
 	t := d.theme
 	d.alertsModal.Clear()
+	d.alertRowIDs = d.alertRowIDs[:0]
 
 	headers := []string{"Status", "Severity", "Service", "Message", "Value", "Fired At"}
 	for i, header := range headers {
@@ -486,6 +553,7 @@ func (d *Dashboard) updateAlertsModal(alerts []alert.Alert) {
 	}
 
 	for row, a := range alerts {
+		d.alertRowIDs = append(d.alertRowIDs, a.ID)
 		statusColor := t.StatusError
 		if a.Status == alert.StatusAcknowledged {
 			statusColor = t.StatusWarn
@@ -633,6 +701,7 @@ func (d *Dashboard) ShowDaemonError(err error) {
 		fmt.Fprint(d.daemonErrView, daemonErrorText(d.theme, err))
 		d.pages.SwitchToPage("error") // hides the help page too
 		d.showingHelp = false
+		d.showingTracesModal = false
 	})
 }
 
@@ -644,5 +713,6 @@ func (d *Dashboard) ClearDaemonError() {
 		d.daemonError = nil
 		d.pages.SwitchToPage("dashboard") // hides the help page too
 		d.showingHelp = false
+		d.showingTracesModal = false
 	})
 }

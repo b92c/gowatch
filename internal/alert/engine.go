@@ -2,6 +2,7 @@ package alert
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -11,18 +12,23 @@ import (
 
 // ContainerEvaluatorData encapsulates container properties needed for evaluation
 type ContainerEvaluatorData struct {
-	ID         string
-	Service    string
-	State      string
-	CPUPercent float64
-	MemUsage   uint64
-	OOMEvents  uint64
+	ID             string
+	Service        string
+	State          string
+	Logs           []string
+	CPUPercent     float64
+	MemUsage       uint64
+	OOMEvents      uint64
+	DiskReadBytes  uint64
+	DiskWriteBytes uint64
 }
 
 type AlertEngine struct {
 	activeAlerts map[string]*Alert
 	hitCounters  map[string]int
+	notifyFn     func(Alert)
 	rules        []AlertRule
+	totalFired   int
 	mu           sync.RWMutex
 }
 
@@ -43,22 +49,31 @@ func (ae *AlertEngine) SetRules(rules []AlertRule) {
 	ae.rules = rules
 }
 
-func (ae *AlertEngine) Evaluate(containers []ContainerEvaluatorData, host metrics.HostInfo) []Alert {
+// SetNotifyFunc registers a callback invoked on alert firing or resolution.
+func (ae *AlertEngine) SetNotifyFunc(fn func(Alert)) {
 	ae.mu.Lock()
 	defer ae.mu.Unlock()
+	ae.notifyFn = fn
+}
+
+func (ae *AlertEngine) Evaluate(containers []ContainerEvaluatorData, host metrics.HostInfo) []Alert {
+	ae.mu.Lock()
 
 	activeContainerIDs := make(map[string]bool)
 	for _, c := range containers {
 		activeContainerIDs[c.ID] = true
 	}
 
-	for key, alert := range ae.activeAlerts {
-		if !activeContainerIDs[alert.ContainerID] {
-			if alert.Status == StatusFiring || alert.Status == StatusAcknowledged {
+	var toNotify []Alert
+
+	for key, a := range ae.activeAlerts {
+		if !activeContainerIDs[a.ContainerID] {
+			if a.Status == StatusFiring || a.Status == StatusAcknowledged {
 				now := time.Now()
-				alert.Status = StatusResolved
-				alert.ResolvedAt = &now
-				alert.Message = "Container terminated (stale alert auto-resolved)"
+				a.Status = StatusResolved
+				a.ResolvedAt = &now
+				a.Message = "Container terminated (stale alert auto-resolved)"
+				toNotify = append(toNotify, copyAlert(a))
 			}
 			delete(ae.hitCounters, key)
 		}
@@ -86,7 +101,7 @@ func (ae *AlertEngine) Evaluate(containers []ContainerEvaluatorData, host metric
 				if hits >= rule.ConsecutiveHits {
 					existing, exists := ae.activeAlerts[key]
 					if !exists || existing.Status == StatusResolved {
-						ae.activeAlerts[key] = &Alert{
+						newAlert := &Alert{
 							ID:          key + ":" + fmt.Sprintf("%d", now.UnixNano()),
 							ContainerID: c.ID,
 							ServiceName: serviceName,
@@ -97,6 +112,9 @@ func (ae *AlertEngine) Evaluate(containers []ContainerEvaluatorData, host metric
 							Status:      StatusFiring,
 							FiredAt:     now,
 						}
+						ae.activeAlerts[key] = newAlert
+						ae.totalFired++
+						toNotify = append(toNotify, copyAlert(newAlert))
 					} else if existing.Status == StatusFiring {
 						existing.Value = val
 						existing.Message = fmt.Sprintf("%s: %.1f (threshold: %.1f)", rule.Description, val, rule.Threshold)
@@ -110,6 +128,7 @@ func (ae *AlertEngine) Evaluate(containers []ContainerEvaluatorData, host metric
 						existing.Status = StatusResolved
 						existing.ResolvedAt = &now
 						ae.hitCounters[key] = 0
+						toNotify = append(toNotify, copyAlert(existing))
 					}
 				} else {
 					ae.hitCounters[key] = 0
@@ -118,7 +137,17 @@ func (ae *AlertEngine) Evaluate(containers []ContainerEvaluatorData, host metric
 		}
 	}
 
-	return ae.getSnapshotLocked()
+	snapshot := ae.getSnapshotLocked()
+	notifyFn := ae.notifyFn
+	ae.mu.Unlock()
+
+	if notifyFn != nil {
+		for _, a := range toNotify {
+			notifyFn(a)
+		}
+	}
+
+	return snapshot
 }
 
 func (ae *AlertEngine) evaluateRule(c ContainerEvaluatorData, host metrics.HostInfo, rule AlertRule) (float64, bool) {
@@ -151,16 +180,45 @@ func (ae *AlertEngine) evaluateRule(c ContainerEvaluatorData, host metrics.HostI
 		}
 		return val, isDown
 
+	case "disk_io_mb":
+		diskMB := float64(c.DiskReadBytes+c.DiskWriteBytes) / (1024.0 * 1024.0)
+		return diskMB, diskMB >= rule.Threshold
+
+	case "log_pattern":
+		if rule.Pattern == "" {
+			return 0, false
+		}
+		matches := countLogPatternMatches(c.Logs, rule.Pattern)
+		return float64(matches), float64(matches) >= rule.Threshold
+
 	default:
 		return 0, false
 	}
 }
 
+func countLogPatternMatches(logs []string, pattern string) int {
+	re, err := regexp.Compile("(?i)" + pattern)
+	count := 0
+	if err == nil {
+		for _, line := range logs {
+			if re.MatchString(line) {
+				count++
+			}
+		}
+		return count
+	}
+	lowerPat := strings.ToLower(pattern)
+	for _, line := range logs {
+		if strings.Contains(strings.ToLower(line), lowerPat) {
+			count++
+		}
+	}
+	return count
+}
+
 func (ae *AlertEngine) isBelowHysteresis(c ContainerEvaluatorData, host metrics.HostInfo, rule AlertRule, currentVal float64) bool {
 	switch rule.Metric {
-	case "cpu_percent":
-		return currentVal < rule.HysteresisThreshold
-	case "mem_percent":
+	case "cpu_percent", "mem_percent", "disk_io_mb":
 		return currentVal < rule.HysteresisThreshold
 	default:
 		return currentVal <= rule.HysteresisThreshold
@@ -177,6 +235,69 @@ func (ae *AlertEngine) AcknowledgeAlert(alertID string) {
 			break
 		}
 	}
+}
+
+// AcknowledgeFirstFiring marks the first firing alert as acknowledged.
+func (ae *AlertEngine) AcknowledgeFirstFiring() (Alert, bool) {
+	ae.mu.Lock()
+	defer ae.mu.Unlock()
+
+	for _, a := range ae.activeAlerts {
+		if a.Status == StatusFiring {
+			a.Status = StatusAcknowledged
+			return copyAlert(a), true
+		}
+	}
+	return Alert{}, false
+}
+
+// ResolveAlert manually resolves an active or acknowledged alert.
+func (ae *AlertEngine) ResolveAlert(alertID string) bool {
+	ae.mu.Lock()
+	var resolved *Alert
+	for key, a := range ae.activeAlerts {
+		if a.ID == alertID && (a.Status == StatusFiring || a.Status == StatusAcknowledged) {
+			now := time.Now()
+			a.Status = StatusResolved
+			a.ResolvedAt = &now
+			ae.hitCounters[key] = 0
+			cp := copyAlert(a)
+			resolved = &cp
+			break
+		}
+	}
+	notifyFn := ae.notifyFn
+	ae.mu.Unlock()
+
+	if resolved != nil && notifyFn != nil {
+		notifyFn(*resolved)
+	}
+	return resolved != nil
+}
+
+// GetStats returns summary counts for alerts in the current session.
+func (ae *AlertEngine) GetStats() AlertStats {
+	ae.mu.RLock()
+	defer ae.mu.RUnlock()
+
+	stats := AlertStats{TotalFired: ae.totalFired}
+	for _, a := range ae.activeAlerts {
+		switch a.Status {
+		case StatusFiring:
+			stats.Firing++
+		case StatusAcknowledged:
+			stats.Acknowledged++
+		case StatusResolved:
+			stats.Resolved++
+		}
+		switch a.Severity {
+		case SeverityCritical:
+			stats.Critical++
+		case SeverityWarning:
+			stats.Warning++
+		}
+	}
+	return stats
 }
 
 func (ae *AlertEngine) ClearResolvedAlerts() {
@@ -200,12 +321,16 @@ func (ae *AlertEngine) GetActiveAlertsSnapshot() []Alert {
 func (ae *AlertEngine) getSnapshotLocked() []Alert {
 	snapshot := make([]Alert, 0, len(ae.activeAlerts))
 	for _, alert := range ae.activeAlerts {
-		alertCopy := *alert
-		if alert.ResolvedAt != nil {
-			t := *alert.ResolvedAt
-			alertCopy.ResolvedAt = &t
-		}
-		snapshot = append(snapshot, alertCopy)
+		snapshot = append(snapshot, copyAlert(alert))
 	}
 	return snapshot
+}
+
+func copyAlert(alert *Alert) Alert {
+	alertCopy := *alert
+	if alert.ResolvedAt != nil {
+		t := *alert.ResolvedAt
+		alertCopy.ResolvedAt = &t
+	}
+	return alertCopy
 }

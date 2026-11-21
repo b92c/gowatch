@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -48,9 +49,28 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("aws.enabled must be auto, true or false, got %q", c.AWS.Enabled))
 	}
 	errs = append(errs, c.Alerts.validate()...)
+	errs = append(errs, c.Tracing.validate()...)
 	errs = append(errs, c.Layout.validate()...)
 
 	return errors.Join(errs...)
+}
+
+func (t TracingConfig) validate() []error {
+	var errs []error
+	if t.SamplingRate != nil && (math.IsNaN(*t.SamplingRate) || *t.SamplingRate < 0 || *t.SamplingRate > 1) {
+		errs = append(errs, fmt.Errorf("tracing.sampling_rate must be between 0 and 1, got %g", *t.SamplingRate))
+	}
+	if t.Exporter.Format != "" {
+		switch strings.ToLower(strings.TrimSpace(t.Exporter.Format)) {
+		case "otlp", "jaeger", "gowatch":
+		default:
+			errs = append(errs, fmt.Errorf("tracing.exporter.format must be otlp, jaeger or gowatch, got %q", t.Exporter.Format))
+		}
+	}
+	if t.Exporter.Enabled && strings.TrimSpace(t.Exporter.Endpoint) == "" {
+		errs = append(errs, errors.New("tracing.exporter.endpoint must be set when tracing.exporter.enabled is true"))
+	}
+	return errs
 }
 
 // validate checks the panel heights. They are relative weights: 0 means "not
@@ -100,6 +120,11 @@ func (a AlertsConfig) validate() []error {
 		if o.ConsecutiveHits != nil && *o.ConsecutiveHits < 1 {
 			errs = append(errs, fmt.Errorf("alerts.rules.%s.consecutive_hits must be at least 1, got %d", id, *o.ConsecutiveHits))
 		}
+		if o.Pattern != nil && *o.Pattern != "" {
+			if _, err := regexp.Compile(*o.Pattern); err != nil {
+				errs = append(errs, fmt.Errorf("alerts.rules.%s.pattern is not a valid regular expression: %w", id, err))
+			}
+		}
 		validNumbers := true
 		for _, field := range []struct {
 			value *float64
@@ -120,6 +145,14 @@ func (a AlertsConfig) validate() []error {
 			if *o.Hysteresis > threshold {
 				errs = append(errs, fmt.Errorf("alerts.rules.%s.hysteresis (%g) must not exceed threshold (%g)", id, *o.Hysteresis, threshold))
 			}
+		}
+	}
+	if a.Notifications.SMTP.Host != "" {
+		if a.Notifications.SMTP.Port < 1 || a.Notifications.SMTP.Port > 65535 {
+			errs = append(errs, fmt.Errorf("alerts.notifications.smtp.port must be between 1 and 65535, got %d", a.Notifications.SMTP.Port))
+		}
+		if len(a.Notifications.SMTP.To) == 0 {
+			errs = append(errs, errors.New("alerts.notifications.smtp.to must list at least one recipient"))
 		}
 	}
 	return errs

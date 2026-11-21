@@ -1,7 +1,7 @@
 # Active Memory - GoWatch Session
 
-**Data**: 2026-10-17  
-**Status**: P1.4 entregue - Busca por palavra-chave no texto dos logs e exportação de logs em JSON (Fase 1); P2.3 (atalhos remapeáveis e ajuda interativa), P2.2 e P2.1 entregues antes. Fase 2 concluída, exceto o modo Emacs. O estado das demais fases foi conferido com o código (por item em `project-roadmap.md`; resumo em "Estado atual")
+**Data**: 2026-11-20  
+**Status**: Fases 1 a 5 concluídas (Etapas 1 a 4 do plano de fechamento de lacunas implementadas e verificadas). Fases 6 e 7 permanecem não iniciadas.
 
 ---
 
@@ -87,6 +87,44 @@
 
 ---
 
+## Plano de Fechamento das Lacunas (Fases 1 a 5)
+
+Plano estruturado em 4 etapas incrementais (registrado também em `.context/docs/project-roadmap.md`), preservando `legacy_look_test.go`, `input_oracle_test.go`, `untrusted.go`, o pacote folha `internal/config`, `fieldalignment` e `gosec`:
+
+### Etapa 1 — Fase 1: Filtros Avançados (P1.1) e Resumo Histórico `min/max/avg` (P1.3)
+- **P1.1 (Filtros por `status` e `labels` + persistência):**
+  - `internal/docker/collector.go`: adicionar `Labels map[string]string` em `Container` (copiando `c.Labels`) e `IncludeAllContainers bool` em `docker.Options`.
+  - `internal/filter/filter.go`: generalizar `matchesStatusAndLabels` para qualquer chave/valor em `c.Labels`; suportar qualificadores `status:<state>` e `label:<key>=<val>` (ou `label:<key>`) na busca (`/`, `f`) sem alterar o placeholder `"name, id or image..."`; adicionar `CycleStatusFilter()` e `ActionCycleStatus` (`s`/`S`).
+  - `internal/config/`: adicionar `filters.labels` e `filters.persist` (bloqueado em `./gowatch.yaml`), salvando/restaurando filtros em `~/.gowatch/filter_state.yaml`.
+- **P1.3 (Resumo `min/max/avg` de CPU e memória):**
+  - `pkg/metrics/types.go`: adicionar `FormatByteStatsSummaryMB(values []MetricPoint) string`.
+  - `internal/ui/dashboard.go` e `keymap.go`: adicionar `showStatsSummary bool` (`history.show_summary` no YAML e ação `ActionToggleStatsSummary` em `m`/`M`) para exibir `min/max/avg` nas células de `CPU %` e `Memory` quando ativo.
+
+### Etapa 2 — Fase 5: Regras Estendidas (P5.1), Gestão de Alertas (P5.3) e Notificações (P5.2)
+- **P5.1 (Limites de Disco I/O e padrão em logs):**
+  - `internal/alert/types.go` e `engine.go`: estender `ContainerEvaluatorData` com `DiskReadBytes`, `DiskWriteBytes` e `Logs []string`; adicionar `Pattern string` em `AlertRule` e métricas `disk_io_mb` (`HIGH_DISK_IO`) e `log_pattern` (`LOG_PATTERN`).
+- **P5.3 (Acknowledge/Resolve na UI e estatísticas):**
+  - `internal/alert/engine.go`: adicionar `ResolveAlert(alertID string)` e `GetStats() AlertStats` ao lado de `AcknowledgeAlert(alertID string)`.
+  - `internal/ui/dashboard.go` e `input.go`: mapear linhas do `alertsModal` para IDs de alerta e conectar `ActionAcknowledgeAlert` (`u`/`U`) com feedback via `showMessage`.
+- **P5.2 (Canais de notificação em `internal/notify`):**
+  - Criar `internal/notify` com `Dispatcher` assíncrono (deduplicando transições `FIRING`/`RESOLVED`) para Webhook genérico, Slack/Discord/Teams, SMTP, PagerDuty/SNS/SQS e notificações desktop/terminal.
+  - `internal/config/untrusted.go`: bloquear destinos de `alerts.notifications` em `./gowatch.yaml`.
+
+### Etapa 3 — Fase 3: Visualização de Traces (P3.2) e Exportação/Sampling (P3.3)
+- **P3.2 (Modal de traces, Flamegraph ASCII e vínculo log-to-span):**
+  - `internal/docker/collector.go` e `internal/filter/filter.go`: guardar `TraceID`/`SpanID` em `FormattedLog` e permitir filtro `trace:<trace_id>`.
+  - `internal/ui/traces.go`: página `"traces_modal"` (`ActionToggleTraces` em `t`/`T`) com tabela de traces, Flamegraph/Waterfall ASCII (`ParentSpanID` → `SpanID`) e logs correlacionados (`Enter` filtra os logs pelo trace).
+- **P3.3 (Exportadores OTLP/Jaeger e sampling):**
+  - `internal/trace/types.go` e `exporter.go`: adicionar `SampleRate` (`0.0`..`1.0` por hash de `TraceID`) no `TraceStore` e expandir `Exporter` para formatos `otlp`, `jaeger` e `gowatch` em background.
+  - `internal/config/`: adicionar `tracing.sampling_rate` e `tracing.exporter` (bloqueado em `./gowatch.yaml`).
+
+### Etapa 4 — Fase 4: Integração AWS Serverless Real (P4.1 a P4.4)
+- **P4.1 a P4.4 (Cliente AWS SigV4 e coletores reais em `internal/aws/`):**
+  - `internal/aws/client.go`: implementar assinatura HTTP AWS Signature V4 em stdlib (`crypto/hmac`, `crypto/sha256`, `net/http`) lendo variáveis `AWS_*` e `~/.aws/credentials`, com suporte a `EndpointURL` (AWS e LocalStack) e método `CollectAll(ctx context.Context)`.
+  - `cloudwatch.go`, `lambda.go`, `xray.go`, `cloudformation.go`: substituir dados fixos pelas chamadas reais às APIs AWS e conectar ao loop de `WatchContainers`, exibindo `Connected`/`LastError` na visão AWS (`a`).
+
+---
+
 ## Notas técnicas importantes
 - A configuração é lida uma única vez na inicialização (sem hot reload). `docker.Configure()` deve ser chamado em `main` antes de o goroutine de coleta começar.
 - Os IDs de regra no YAML são minúsculos (`high_cpu`), enquanto `alert.DefaultRules()` usa maiúsculos (`HIGH_CPU`); a comparação ignora maiúsculas e minúsculas.
@@ -106,5 +144,5 @@
 
 ---
 
-**Encerrado em**: 2026-10-17  
-**Retomar por**: uma das candidatas listadas em "Estado atual" (P5.2, P5.3, Fase 7, tornar a Fase 4 real ou as lacunas da Fase 3), conforme priorizado pelo usuário. A Fase 2 está concluída, menos o modo Emacs.
+**Encerrado em**: 2026-11-20  
+**Retomar por**: Fases 6 ou 7 (conforme priorização do usuário), com Fases 1 a 5 concluídas e verificadas.

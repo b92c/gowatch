@@ -1,6 +1,7 @@
 package filter
 
 import (
+	"maps"
 	"strings"
 
 	"github.com/b92c/gowatch/internal/docker"
@@ -38,10 +39,44 @@ func (f *FilterState) SetStatusFilter(status []string) {
 }
 
 func (f *FilterState) SetLabelFilter(key, value string) {
+	if f.LabelFilters == nil {
+		f.LabelFilters = make(map[string]string)
+	}
 	if value == "" {
 		delete(f.LabelFilters, key)
 	} else {
 		f.LabelFilters[key] = value
+	}
+	f.updateActive()
+}
+
+// SetLabelFilters replaces all active label filters.
+func (f *FilterState) SetLabelFilters(labels map[string]string) {
+	if len(labels) == 0 {
+		f.LabelFilters = make(map[string]string)
+	} else {
+		f.LabelFilters = maps.Clone(labels)
+	}
+	f.updateActive()
+}
+
+// CycleStatusFilter cycles through common container states and clears back to all.
+func (f *FilterState) CycleStatusFilter() {
+	if len(f.StatusFilter) == 0 {
+		f.StatusFilter = []string{"running"}
+	} else if len(f.StatusFilter) == 1 {
+		switch strings.ToLower(f.StatusFilter[0]) {
+		case "running":
+			f.StatusFilter = []string{"restarting"}
+		case "restarting":
+			f.StatusFilter = []string{"exited"}
+		case "exited":
+			f.StatusFilter = []string{"paused"}
+		default:
+			f.StatusFilter = nil
+		}
+	} else {
+		f.StatusFilter = nil
 	}
 	f.updateActive()
 }
@@ -92,10 +127,10 @@ func FilterContainers(containers docker.Containers, filter FilterState) docker.C
 	filtered.Traces = containers.Traces
 	filtered.AWS = containers.AWS
 
-	searchLower := strings.ToLower(filter.SearchText)
+	effFilter, searchLower, traceFilter := parseSearchQualifiers(filter)
 
 	for _, c := range containers.C {
-		if !matchesStatusAndLabels(c, filter) {
+		if !matchesStatusAndLabels(c, effFilter) {
 			continue
 		}
 
@@ -114,11 +149,15 @@ func FilterContainers(containers docker.Containers, filter FilterState) docker.C
 		}
 
 		for _, line := range c.Log {
-			if !listed && !strings.Contains(strings.ToLower(line), searchLower) {
+			lowerLine := strings.ToLower(line)
+			if !listed && !strings.Contains(lowerLine, searchLower) {
+				continue
+			}
+			if traceFilter != "" && !strings.Contains(lowerLine, traceFilter) {
 				continue
 			}
 			level := docker.ParseLogLevel(line)
-			if filter.MinLogLevel > metrics.LogLevelUnknown && level < filter.MinLogLevel {
+			if effFilter.MinLogLevel > metrics.LogLevelUnknown && level < effFilter.MinLogLevel {
 				continue
 			}
 			filtered.FlatLogs = append(filtered.FlatLogs, docker.FormattedLog{
@@ -130,6 +169,54 @@ func FilterContainers(containers docker.Containers, filter FilterState) docker.C
 	}
 
 	return filtered
+}
+
+// parseSearchQualifiers extracts status:<state>, label:<key>[=<val>], and
+// trace:<trace_id> tokens from filter.SearchText and merges them into a copy
+// of filter, returning the remaining free-text search and trace filter in lower case.
+func parseSearchQualifiers(filter FilterState) (FilterState, string, string) {
+	eff := filter
+	if len(filter.StatusFilter) > 0 {
+		eff.StatusFilter = append([]string(nil), filter.StatusFilter...)
+	}
+	eff.LabelFilters = maps.Clone(filter.LabelFilters)
+	if eff.LabelFilters == nil {
+		eff.LabelFilters = make(map[string]string)
+	}
+
+	if filter.SearchText == "" {
+		return eff, "", ""
+	}
+
+	var freeTokens []string
+	var inlineStatuses []string
+	var traceFilter string
+	for _, tok := range strings.Fields(filter.SearchText) {
+		lowerTok := strings.ToLower(tok)
+		if val, ok := strings.CutPrefix(lowerTok, "status:"); ok && val != "" {
+			inlineStatuses = append(inlineStatuses, val)
+			continue
+		}
+		if val, ok := strings.CutPrefix(lowerTok, "trace:"); ok && val != "" {
+			traceFilter = val
+			continue
+		}
+		if rawLabel, ok := strings.CutPrefix(tok, "label:"); ok && rawLabel != "" {
+			if k, v, hasEq := strings.Cut(rawLabel, "="); hasEq && k != "" {
+				eff.LabelFilters[k] = v
+				continue
+			}
+			eff.LabelFilters[rawLabel] = "*"
+			continue
+		}
+		freeTokens = append(freeTokens, lowerTok)
+	}
+
+	if len(inlineStatuses) > 0 {
+		eff.StatusFilter = append(eff.StatusFilter, inlineStatuses...)
+	}
+
+	return eff, strings.Join(freeTokens, " "), traceFilter
 }
 
 // matchesSearch reports whether the container's service name, ID or image
@@ -160,11 +247,16 @@ func matchesStatusAndLabels(c docker.Container, filter FilterState) bool {
 	}
 
 	for key, value := range filter.LabelFilters {
-		switch key {
-		case "com.docker.compose.service":
-			if c.Service != value {
-				return false
-			}
+		actual, ok := c.Labels[key]
+		if !ok && key == "com.docker.compose.service" && c.Service != "" {
+			actual = c.Service
+			ok = true
+		}
+		if !ok {
+			return false
+		}
+		if value != "*" && actual != value {
+			return false
 		}
 	}
 

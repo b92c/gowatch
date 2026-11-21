@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"hash/fnv"
 	"sync"
 	"time"
 )
@@ -30,16 +31,51 @@ const MaxTraceStoreSize = 500
 const TraceTTL = 5 * time.Minute
 
 type TraceStore struct {
-	traces map[string]*Trace
-	order  []string
-	mu     sync.RWMutex
+	traces     map[string]*Trace
+	exporter   *Exporter
+	order      []string
+	sampleRate float64
+	mu         sync.RWMutex
 }
 
 func NewTraceStore() *TraceStore {
 	return &TraceStore{
-		traces: make(map[string]*Trace),
-		order:  make([]string, 0, MaxTraceStoreSize),
+		traces:     make(map[string]*Trace),
+		order:      make([]string, 0, MaxTraceStoreSize),
+		sampleRate: 1.0,
 	}
+}
+
+// SetSampleRate configures deterministic trace sampling in [0.0, 1.0].
+func (ts *TraceStore) SetSampleRate(rate float64) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	if rate < 0 {
+		rate = 0
+	} else if rate > 1 {
+		rate = 1
+	}
+	ts.sampleRate = rate
+}
+
+// SetExporter attaches an optional trace exporter invoked when spans arrive.
+func (ts *TraceStore) SetExporter(exp *Exporter) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	ts.exporter = exp
+}
+
+func shouldSampleTrace(traceID string, rate float64) bool {
+	if rate >= 1.0 {
+		return true
+	}
+	if rate <= 0.0 {
+		return false
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(traceID))
+	ratio := float64(h.Sum32()) / float64(^uint32(0))
+	return ratio <= rate
 }
 
 func (ts *TraceStore) AddSpan(span *Span) {
@@ -48,7 +84,10 @@ func (ts *TraceStore) AddSpan(span *Span) {
 	}
 
 	ts.mu.Lock()
-	defer ts.mu.Unlock()
+	if !shouldSampleTrace(span.TraceID, ts.sampleRate) {
+		ts.mu.Unlock()
+		return
+	}
 
 	now := time.Now()
 
@@ -98,6 +137,18 @@ func (ts *TraceStore) AddSpan(span *Span) {
 		if endTime.After(tr.StartTime.Add(tr.Duration)) {
 			tr.Duration = endTime.Sub(tr.StartTime)
 		}
+	}
+
+	exp := ts.exporter
+	var trCopy Trace
+	if exp != nil {
+		trCopy = *tr
+		trCopy.Spans = append([]*Span(nil), tr.Spans...)
+	}
+	ts.mu.Unlock()
+
+	if exp != nil {
+		exp.EnqueueTrace(trCopy)
 	}
 }
 

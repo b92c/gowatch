@@ -97,3 +97,10 @@ func FormatStatsSummary(values []MetricPoint, unit string) string {
 	}
 	return fmt.Sprintf("min:%.1f%s max:%.1f%s avg:%.1f%s", min, unit, max, unit, avg, unit)
 }
+
+// FormatByteStatsSummaryMB formats byte-denominated MetricPoints as MB summaries.
+func FormatByteStatsSummaryMB(values []MetricPoint) string {
+	minVal, maxVal, avgVal := GetStatsSummary(values)
+	const mb = 1024.0 * 1024.0
+	return fmt.Sprintf("min:%.1fMB max:%.1fMB avg:%.1fMB", minVal/mb, maxVal/mb, avgVal/mb)
+}

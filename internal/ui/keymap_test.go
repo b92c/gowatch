@@ -219,7 +219,14 @@ var nativeKeyTable = map[string]Action{
 func TestDefaultPresetIsTheOriginalKeymap(t *testing.T) {
 	km := DefaultKeymap()
 
-	want := map[string]Action{"?": ActionHelp, "e": ActionExportLogs, "E": ActionExportLogs}
+	want := map[string]Action{
+		"?": ActionHelp,
+		"e": ActionExportLogs, "E": ActionExportLogs,
+		"i": ActionToggleStatsSummary, "I": ActionToggleStatsSummary,
+		"t": ActionToggleTraces, "T": ActionToggleTraces,
+		"o": ActionCycleStatus, "O": ActionCycleStatus,
+		"y": ActionAcknowledgeAlert, "Y": ActionAcknowledgeAlert,
+	}
 	for key, action := range legacyKeyTable {
 		want[key] = action
 	}
@@ -394,8 +401,8 @@ func TestPresetsDoNotUseReservedOrAliasedKeys(t *testing.T) {
 
 func TestActionMetadata(t *testing.T) {
 	want := []string{
-		"help", "quit", "docker_view", "aws_view", "search", "cycle_log_level", "export_logs", "clear_filter",
-		"toggle_alerts", "clear_resolved_alerts", "scroll_up", "scroll_down", "page_up", "page_down",
+		"help", "quit", "docker_view", "aws_view", "toggle_stats_summary", "toggle_traces", "search", "cycle_log_level", "cycle_status", "export_logs", "clear_filter",
+		"toggle_alerts", "acknowledge_alert", "clear_resolved_alerts", "scroll_up", "scroll_down", "page_up", "page_down",
 		"scroll_top", "scroll_bottom",
 	}
 	if got := ActionNames(); !reflect.DeepEqual(got, want) {
