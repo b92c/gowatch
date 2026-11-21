@@ -1,8 +1,14 @@
 package aws
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -28,6 +34,7 @@ type AWSState struct {
 
 type AWSClientManager struct {
 	httpClient  *http.Client
+	creds       Credentials
 	region      string
 	endpointURL string
 	state       AWSState
@@ -80,6 +87,7 @@ func NewAWSClientManagerWithOptions(o Options) *AWSClientManager {
 	return &AWSClientManager{
 		region:      region,
 		endpointURL: endpointURL,
+		creds:       LoadCredentials(),
 		httpClient:  &http.Client{Timeout: 10 * time.Second},
 		state: AWSState{
 			Enabled:     enabled,
@@ -126,4 +134,102 @@ func (m *AWSClientManager) EndpointURL() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.endpointURL
+}
+
+// HasLiveConfig reports whether an explicit endpoint or AWS credentials are present.
+func (m *AWSClientManager) HasLiveConfig() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.endpointURL != "" || m.creds.AccessKeyID != ""
+}
+
+func (m *AWSClientManager) serviceEndpoint(service string) string {
+	m.mu.RLock()
+	ep := m.endpointURL
+	region := m.region
+	m.mu.RUnlock()
+	if ep != "" {
+		return strings.TrimRight(ep, "/")
+	}
+	return fmt.Sprintf("https://%s.%s.amazonaws.com", service, region)
+}
+
+// DoSignedRequest executes an AWS HTTP request signed with SigV4 when credentials are available.
+func (m *AWSClientManager) DoSignedRequest(ctx context.Context, service, method, path string, headers map[string]string, body []byte) ([]byte, int, error) {
+	url := m.serviceEndpoint(service) + path
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	m.mu.RLock()
+	creds := m.creds
+	region := m.region
+	client := m.httpClient
+	m.mu.RUnlock()
+
+	if creds.AccessKeyID != "" && creds.SecretAccessKey != "" {
+		SignRequest(req, body, creds, region, service, time.Now())
+	}
+
+	resp, err := client.Do(req) // #nosec G107 -- AWS SDK-style endpoint configured by user/environment
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+	if resp.StatusCode >= 400 {
+		return respBody, resp.StatusCode, fmt.Errorf("aws %s HTTP %d", service, resp.StatusCode)
+	}
+	return respBody, resp.StatusCode, nil
+}
+
+// CollectAll refreshes CloudWatch, Lambda, X-Ray, and CloudFormation resources
+// when the AWS integration is enabled.
+func (m *AWSClientManager) CollectAll(ctx context.Context) error {
+	if m == nil || !m.GetState().Enabled {
+		return nil
+	}
+
+	var (
+		all  []AWSResource
+		errs []error
+	)
+
+	if cwRes, err := NewCloudWatchCollector(m).ListLogGroups(ctx); err != nil {
+		errs = append(errs, err)
+	} else {
+		all = append(all, cwRes...)
+	}
+	if lambdaRes, err := NewLambdaCollector(m).ListFunctions(ctx); err != nil {
+		errs = append(errs, err)
+	} else {
+		all = append(all, lambdaRes...)
+	}
+	if xrayRes, err := NewXRayCollector(m).FetchServiceGraph(ctx); err != nil {
+		errs = append(errs, err)
+	} else {
+		all = append(all, xrayRes...)
+	}
+	if cfRes, err := NewCloudFormationCollector(m).ListStacks(ctx); err != nil {
+		errs = append(errs, err)
+	} else {
+		all = append(all, cfRes...)
+	}
+
+	if len(all) == 0 && len(errs) > 0 {
+		joined := errors.Join(errs...)
+		m.SetConnected(false, joined.Error())
+		return joined
+	}
+
+	m.SetResources(all)
+	return nil
 }

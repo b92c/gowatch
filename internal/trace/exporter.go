@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -14,13 +16,36 @@ import (
 type Exporter struct {
 	client    *http.Client
 	targetURL string
+	format    string
 }
 
 func NewExporter(targetURL string) *Exporter {
+	return NewExporterWithFormat(targetURL, "gowatch")
+}
+
+// NewExporterWithFormat creates an Exporter for "otlp", "jaeger", or "gowatch".
+func NewExporterWithFormat(targetURL, format string) *Exporter {
+	f := strings.ToLower(strings.TrimSpace(format))
+	if f == "" {
+		f = "gowatch"
+	}
 	return &Exporter{
 		targetURL: targetURL,
+		format:    f,
 		client:    &http.Client{Timeout: 5 * time.Second},
 	}
+}
+
+// EnqueueTrace exports tr asynchronously in the background.
+func (e *Exporter) EnqueueTrace(tr Trace) {
+	if e == nil || e.targetURL == "" {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = e.ExportTrace(ctx, tr)
+	}()
 }
 
 func (e *Exporter) ExportTrace(ctx context.Context, tr Trace) error {
@@ -28,18 +53,18 @@ func (e *Exporter) ExportTrace(ctx context.Context, tr Trace) error {
 		return nil
 	}
 
-	data, err := json.Marshal(tr)
+	payload, err := e.encodeTrace(tr)
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.targetURL, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.targetURL, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := e.client.Do(req)
+	resp, err := e.client.Do(req) // #nosec G107 -- targetURL is configured in trusted config
 	if err != nil {
 		return err
 	}
@@ -50,6 +75,65 @@ func (e *Exporter) ExportTrace(ctx context.Context, tr Trace) error {
 	}
 
 	return nil
+}
+
+func (e *Exporter) encodeTrace(tr Trace) ([]byte, error) {
+	switch e.format {
+	case "otlp":
+		svc := "gowatch"
+		if tr.RootSpan != nil && tr.RootSpan.ServiceName != "" {
+			svc = tr.RootSpan.ServiceName
+		}
+		spans := make([]map[string]any, 0, len(tr.Spans))
+		for _, s := range tr.Spans {
+			startNs := s.StartTime.UnixNano()
+			endNs := s.StartTime.Add(s.Duration).UnixNano()
+			spans = append(spans, map[string]any{
+				"traceId":           s.TraceID,
+				"spanId":            s.SpanID,
+				"parentSpanId":      s.ParentSpanID,
+				"name":              s.OperationName,
+				"startTimeUnixNano": strconv.FormatInt(startNs, 10),
+				"endTimeUnixNano":   strconv.FormatInt(endNs, 10),
+				"status":            map[string]string{"code": s.StatusCode},
+			})
+		}
+		return json.Marshal(map[string]any{
+			"resourceSpans": []map[string]any{{
+				"resource": map[string]any{
+					"attributes": []map[string]any{{
+						"key":   "service.name",
+						"value": map[string]string{"stringValue": svc},
+					}},
+				},
+				"scopeSpans": []map[string]any{{
+					"spans": spans,
+				}},
+			}},
+		})
+	case "jaeger":
+		svc := "gowatch"
+		if tr.RootSpan != nil && tr.RootSpan.ServiceName != "" {
+			svc = tr.RootSpan.ServiceName
+		}
+		spans := make([]map[string]any, 0, len(tr.Spans))
+		for _, s := range tr.Spans {
+			spans = append(spans, map[string]any{
+				"traceID":       s.TraceID,
+				"spanID":        s.SpanID,
+				"parentSpanID":  s.ParentSpanID,
+				"operationName": s.OperationName,
+				"startTime":     s.StartTime.UnixMicro(),
+				"duration":      s.Duration.Microseconds(),
+			})
+		}
+		return json.Marshal(map[string]any{
+			"process": map[string]any{"serviceName": svc},
+			"spans":   spans,
+		})
+	default:
+		return json.Marshal(tr)
+	}
 }
 
 type OTLPReceiver struct {

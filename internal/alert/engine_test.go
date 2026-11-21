@@ -147,3 +147,73 @@ func TestAlertEngineConcurrency(t *testing.T) {
 	<-done
 	<-done
 }
+
+func TestAlertEngineDiskIOAndLogPattern(t *testing.T) {
+	rules := []AlertRule{
+		{
+			ID:                  "HIGH_DISK_IO",
+			Metric:              "disk_io_mb",
+			Threshold:           100.0,
+			HysteresisThreshold: 50.0,
+			ConsecutiveHits:     1,
+			Severity:            SeverityWarning,
+			Description:         "Disk I/O exceeds 100MB",
+		},
+		{
+			ID:                  "LOG_PATTERN",
+			Metric:              "log_pattern",
+			Threshold:           1.0,
+			HysteresisThreshold: 0.0,
+			ConsecutiveHits:     1,
+			Severity:            SeverityCritical,
+			Pattern:             "panic|fatal error",
+			Description:         "Log pattern matched",
+		},
+	}
+
+	engine := NewAlertEngine(rules)
+	var notified []Alert
+	engine.SetNotifyFunc(func(a Alert) {
+		notified = append(notified, a)
+	})
+
+	host := metrics.HostInfo{CPUCount: 2, MemTotal: 1 << 30}
+	const mb = 1024 * 1024
+
+	alerts := engine.Evaluate([]ContainerEvaluatorData{{
+		ID:             "c1",
+		Service:        "api",
+		State:          "running",
+		DiskReadBytes:  60 * mb,
+		DiskWriteBytes: 50 * mb,
+		Logs:           []string{"INFO ok", "FATAL ERROR: db down"},
+	}}, host)
+
+	if len(alerts) != 2 {
+		t.Fatalf("expected 2 alerts, got %d", len(alerts))
+	}
+	if len(notified) != 2 {
+		t.Fatalf("expected 2 notifications on firing, got %d", len(notified))
+	}
+
+	stats := engine.GetStats()
+	if stats.TotalFired != 2 || stats.Firing != 2 || stats.Critical != 1 || stats.Warning != 1 {
+		t.Errorf("unexpected stats: %+v", stats)
+	}
+
+	ack, ok := engine.AcknowledgeFirstFiring()
+	if !ok || ack.Status != StatusAcknowledged {
+		t.Fatalf("AcknowledgeFirstFiring() = (%+v, %v)", ack, ok)
+	}
+	if !engine.ResolveAlert(ack.ID) {
+		t.Errorf("ResolveAlert(%q) returned false", ack.ID)
+	}
+
+	stats = engine.GetStats()
+	if stats.Resolved != 1 || stats.Firing != 1 {
+		t.Errorf("unexpected stats after resolve: %+v", stats)
+	}
+	if len(notified) != 3 || notified[2].Status != StatusResolved {
+		t.Errorf("expected resolution notification, got %+v", notified)
+	}
+}

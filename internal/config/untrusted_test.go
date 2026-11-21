@@ -83,6 +83,11 @@ func TestLoadRestrictsWorkingDirectoryLayer(t *testing.T) {
 		{name: "enabling the receiver on a public address reports the enabled key and the address", layer: "work", content: otlpOn("0.0.0.0:4318"),
 			wantErr: []string{"tracing.otlp_receiver.enabled", "tracing.otlp_receiver.address", "0.0.0.0:4318"}},
 		{name: "other settings in the working directory still apply", layer: "work", content: "logs:\n  tail_lines: 9\n"},
+		{name: "filters.persist from the working directory is rejected", layer: "work", content: "filters:\n  persist: true\n",
+			wantErr: []string{"filters.persist", hint1, hint2}},
+		{name: "filters.persist from the home config is accepted", layer: "home", content: "filters:\n  persist: true\n"},
+		{name: "tracing.exporter from the working directory is rejected", layer: "work", content: "tracing:\n  exporter:\n    enabled: true\n    endpoint: http://localhost:4318/v1/traces\n",
+			wantErr: []string{"tracing.exporter", hint1, hint2}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

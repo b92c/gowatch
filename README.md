@@ -308,11 +308,15 @@ keybindings:
 | `quit` | Quit GoWatch | `q` | `q` |
 | `docker_view` | Show the Docker services | `d`, `D` | `d`, `D` |
 | `aws_view` | Show the AWS resources | `a`, `A` | `a`, `A` |
+| `toggle_stats_summary` | Show or hide CPU/memory min/max/avg | `i`, `I` | `i`, `I` |
+| `toggle_traces` | Show or hide the traces flamegraph | `t`, `T` | `t`, `T` |
 | `search` | Focus the search field (searches services and log text) | `/`, `f` | `/`, `f` |
 | `cycle_log_level` | Cycle the minimum log level | `l`, `L` | `l`, `L` |
+| `cycle_status` | Cycle the container status filter | `o`, `O` | `o`, `O` |
 | `export_logs` | Export the logs on screen to a JSON file in the current directory (not while the search field has the focus) | `e`, `E` | `e`, `E` |
 | `clear_filter` | Clear all filters, including the ones from the config file (closes the alerts list first when it is open) | `Esc` | `Esc` |
 | `toggle_alerts` | Show or hide the alerts list | `w`, `W` | `w`, `W` |
+| `acknowledge_alert` | Acknowledge the selected alert | `y`, `Y` | `y`, `Y` |
 | `clear_resolved_alerts` | Clear the resolved alerts (works on every screen) | `c`, `C` | `c`, `C` |
 | `scroll_up` | Scroll up a line | `↑` | `↑`, `k` |
 | `scroll_down` | Scroll down a line | `↓` | `↓`, `j` |

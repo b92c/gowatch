@@ -27,15 +27,15 @@ const DefaultThemeName = "dark"
 
 // Config is the complete GoWatch configuration.
 type Config struct {
-	Layout          LayoutConfig      `yaml:"layout"`
-	Filters         FiltersConfig     `yaml:"filters"`
 	AWS             AWSConfig         `yaml:"aws"`
 	Keybindings     KeybindingsConfig `yaml:"keybindings"`
 	Theme           ThemeConfig       `yaml:"theme"`
-	Alerts          AlertsConfig      `yaml:"alerts"`
 	Tracing         TracingConfig     `yaml:"tracing"`
-	Logs            LogsConfig        `yaml:"logs"`
+	Layout          LayoutConfig      `yaml:"layout"`
+	Filters         FiltersConfig     `yaml:"filters"`
+	Alerts          AlertsConfig      `yaml:"alerts"`
 	History         HistoryConfig     `yaml:"history"`
+	Logs            LogsConfig        `yaml:"logs"`
 	RefreshInterval time.Duration     `yaml:"refresh_interval"`
 }
 
@@ -46,19 +46,31 @@ type LogsConfig struct {
 
 // HistoryConfig controls how many samples are kept for the sparklines.
 type HistoryConfig struct {
-	MaxPoints int `yaml:"max_points"`
+	MaxPoints   int  `yaml:"max_points"`
+	ShowSummary bool `yaml:"show_summary"`
 }
 
 // FiltersConfig holds the filters applied when the dashboard starts.
 type FiltersConfig struct {
-	Search          string   `yaml:"search"`
-	MinLogLevelName string   `yaml:"min_log_level"`
-	Status          []string `yaml:"status"`
+	Labels          map[string]string `yaml:"labels"`
+	Search          string            `yaml:"search"`
+	MinLogLevelName string            `yaml:"min_log_level"`
+	Status          []string          `yaml:"status"`
+	Persist         bool              `yaml:"persist"`
 }
 
 // TracingConfig groups the tracing settings.
 type TracingConfig struct {
-	OTLPReceiver OTLPReceiverConfig `yaml:"otlp_receiver"`
+	SamplingRate *float64            `yaml:"sampling_rate"`
+	Exporter     TraceExporterConfig `yaml:"exporter"`
+	OTLPReceiver OTLPReceiverConfig  `yaml:"otlp_receiver"`
+}
+
+// TraceExporterConfig controls outbound trace export.
+type TraceExporterConfig struct {
+	Format   string `yaml:"format"`
+	Endpoint string `yaml:"endpoint"`
+	Enabled  bool   `yaml:"enabled"`
 }
 
 // OTLPReceiverConfig controls the embedded OTLP/HTTP trace receiver.

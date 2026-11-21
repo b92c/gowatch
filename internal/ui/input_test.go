@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,6 +11,8 @@ import (
 	"github.com/b92c/gowatch/internal/alert"
 	"github.com/b92c/gowatch/internal/config"
 	"github.com/b92c/gowatch/internal/docker"
+	"github.com/b92c/gowatch/internal/filter"
+	"github.com/b92c/gowatch/internal/trace"
 	"github.com/b92c/gowatch/pkg/metrics"
 	"github.com/gdamore/tcell/v2"
 )
@@ -698,4 +701,139 @@ func TestHelpPageIsRebuiltPerKeymap(t *testing.T) {
 	if !strings.Contains(drawPrimitive(t, custom.helpTable, 100, 40).text(), "x ") {
 		t.Error("the help page of the remapped dashboard does not show x")
 	}
+}
+
+func TestNewActionsFromPhases1To5(t *testing.T) {
+	t.Run("toggle_traces opens, scrolls in vim, and closes on Esc or t", func(t *testing.T) {
+		km := mustKeymap(t, config.KeybindingsConfig{Preset: "vim"})
+		d := newTestDashboard(t, Options{Keymap: &km})
+
+		root := &trace.Span{
+			TraceID:       "trace-1",
+			SpanID:        "span-root",
+			ServiceName:   "api",
+			OperationName: "GET /orders",
+			StartTime:     time.Now(),
+			Duration:      100 * time.Millisecond,
+			StatusCode:    "OK",
+		}
+		child := &trace.Span{
+			TraceID:       "trace-1",
+			SpanID:        "span-child",
+			ParentSpanID:  "span-root",
+			ServiceName:   "db",
+			OperationName: "SELECT orders",
+			StartTime:     time.Now().Add(10 * time.Millisecond),
+			Duration:      40 * time.Millisecond,
+			StatusCode:    "ERROR",
+		}
+		d.Update(docker.Containers{
+			Traces: []trace.Trace{{
+				TraceID:  "trace-1",
+				RootSpan: root,
+				Spans:    []*trace.Span{root, child},
+				Duration: 100 * time.Millisecond,
+				HasError: true,
+			}},
+			FlatLogs: []docker.FormattedLog{{
+				Service: "api",
+				TraceID: "trace-1",
+				Line:    "GET /orders failed",
+			}},
+		})
+
+		if txt := d.tracesModal.GetText(true); !strings.Contains(txt, "GET /orders") || !strings.Contains(txt, "SELECT orders") || !strings.Contains(txt, "Correlated Logs") {
+			t.Errorf("tracesModal text missing expected flamegraph/logs: %q", txt)
+		}
+
+		d.handleInput(runeEvent('t'))
+		if !d.showingTracesModal {
+			t.Fatal("t should open traces_modal")
+		}
+		if front, _ := d.pages.GetFrontPage(); front != "traces_modal" {
+			t.Errorf("front page = %q, want traces_modal", front)
+		}
+
+		d.handleInput(runeEvent('j'))
+		if row, _ := d.tracesModal.GetScrollOffset(); row != 1 {
+			t.Errorf("j in traces_modal: scroll row = %d, want 1", row)
+		}
+
+		d.handleInput(keyEvent(tcell.KeyEscape))
+		if d.showingTracesModal {
+			t.Error("Esc should close traces_modal")
+		}
+	})
+
+	t.Run("toggle_stats_summary appends min/max/avg to CPU and Memory cells", func(t *testing.T) {
+		d := newTestDashboard(t, Options{})
+		c := sampleContainers()
+		d.Update(c)
+		before := d.servicesTable.GetCell(1, 3).Text
+		if strings.Contains(before, "min:") {
+			t.Fatalf("CPU cell unexpectedly contains min: before toggle: %q", before)
+		}
+
+		d.handleInput(runeEvent('i'))
+		if !d.showStatsSummary {
+			t.Fatal("i should enable showStatsSummary")
+		}
+		d.Update(c)
+		afterCPU := d.servicesTable.GetCell(1, 3).Text
+		afterMem := d.servicesTable.GetCell(1, 4).Text
+		if !strings.Contains(afterCPU, "min:") || !strings.Contains(afterMem, "MB") {
+			t.Errorf("expected min/max/avg summary in cells, got cpu=%q mem=%q", afterCPU, afterMem)
+		}
+	})
+
+	t.Run("cycle_status cycles filter and persists when configured", func(t *testing.T) {
+		persistPath := filepath.Join(t.TempDir(), "filter_state.json")
+		d := newTestDashboard(t, Options{FilterPersistPath: persistPath})
+		d.handleInput(runeEvent('o'))
+		if len(d.filterState.StatusFilter) != 1 || d.filterState.StatusFilter[0] != "running" {
+			t.Fatalf("StatusFilter after o = %v, want [running]", d.filterState.StatusFilter)
+		}
+		loaded, err := filter.LoadFilterState(persistPath)
+		if err != nil || len(loaded.StatusFilter) != 1 || loaded.StatusFilter[0] != "running" {
+			t.Errorf("persisted filter = (%+v, %v), want [running]", loaded, err)
+		}
+	})
+
+	t.Run("acknowledge_alert acknowledges firing alert and handles empty state", func(t *testing.T) {
+		engine := docker.GetGlobalAlertEngine()
+		engine.ClearResolvedAlerts()
+		id := fmt.Sprintf("ack-test-%d", time.Now().UnixNano())
+		host := metrics.HostInfo{CPUCount: 1, MemTotal: 1 << 30}
+		engine.Evaluate([]alert.ContainerEvaluatorData{{ID: id, Service: "web", State: "dead"}}, host)
+
+		d := newTestDashboard(t, Options{})
+		d.messageDelay = 10 * time.Millisecond
+		d.Update(docker.Containers{Alerts: engine.GetActiveAlertsSnapshot()})
+		d.handleInput(runeEvent('w'))
+		d.handleInput(runeEvent('y'))
+
+		var foundAck bool
+		for _, a := range engine.GetActiveAlertsSnapshot() {
+			if a.ContainerID == id && a.Status == alert.StatusAcknowledged {
+				foundAck = true
+			}
+		}
+		if !foundAck {
+			t.Error("y in alertsModal should acknowledge the selected firing alert")
+		}
+		if got := d.helpBar.GetText(true); !strings.Contains(got, "Alert acknowledged") {
+			t.Errorf("helpBar = %q, want acknowledgement confirmation", got)
+		}
+
+		// Resolve and verify y reports no firing alerts when none remain.
+		for _, a := range engine.GetActiveAlertsSnapshot() {
+			engine.ResolveAlert(a.ID)
+		}
+		engine.ClearResolvedAlerts()
+		d.handleInput(runeEvent('y'))
+		if got := d.helpBar.GetText(true); !strings.Contains(got, "No firing alerts") {
+			t.Errorf("helpBar = %q, want no firing alerts message", got)
+		}
+		d.Stop()
+	})
 }

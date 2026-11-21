@@ -26,6 +26,17 @@ func (c *Config) untrustedSettings(path string) error {
 	if addr := c.Tracing.OTLPReceiver.Address; addr != "" && !isLoopbackAddress(addr) {
 		errs = append(errs, fmt.Errorf("%s: tracing.otlp_receiver.address %q is not honored from the working-directory gowatch.yaml unless it is 127.0.0.1, [::1] or localhost; %s", path, addr, advice))
 	}
+	if c.Filters.Persist {
+		errs = append(errs, fmt.Errorf("%s: filters.persist: true is not honored from the working-directory gowatch.yaml (it could come from an untrusted checkout); %s", path, advice))
+	}
+	n := c.Alerts.Notifications
+	if n.WebhookURL != "" || n.SlackWebhookURL != "" || n.DiscordWebhookURL != "" || n.TeamsWebhookURL != "" ||
+		n.PagerDutyKey != "" || n.PagerDutyEndpoint != "" || n.SNSEndpointURL != "" || n.SMTP.Host != "" {
+		errs = append(errs, fmt.Errorf("%s: alerts.notifications external destinations are not honored from the working-directory gowatch.yaml (it could come from an untrusted checkout); %s", path, advice))
+	}
+	if c.Tracing.Exporter.Enabled || c.Tracing.Exporter.Endpoint != "" {
+		errs = append(errs, fmt.Errorf("%s: tracing.exporter is not honored from the working-directory gowatch.yaml (it could come from an untrusted checkout); %s", path, advice))
+	}
 	return errors.Join(errs...)
 }
 

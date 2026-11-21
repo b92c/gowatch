@@ -1,6 +1,7 @@
 package filter
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/b92c/gowatch/internal/docker"
@@ -244,5 +245,95 @@ func TestFilterContainersEmptySearchIsUnchanged(t *testing.T) {
 	fs.SetSearch("   ")
 	if fs.Active {
 		t.Error("a blank search must not activate the filter")
+	}
+}
+
+func TestFilterContainersLabelsAndQualifiers(t *testing.T) {
+	cnts := docker.Containers{
+		C: []docker.Container{
+			{
+				ID:      "111111111111",
+				Service: "api",
+				State:   "running",
+				Labels:  map[string]string{"env": "prod", "team": "core"},
+				Log:     []string{"[INFO] ready"},
+			},
+			{
+				ID:      "222222222222",
+				Service: "worker",
+				State:   "exited",
+				Labels:  map[string]string{"env": "staging"},
+				Log:     []string{"[ERROR] failed"},
+			},
+		},
+	}
+
+	fs := NewFilterState()
+	fs.SetLabelFilters(map[string]string{"env": "prod"})
+	got := FilterContainers(cnts, fs)
+	if list := serviceNames(got.C); !equalStrings(list, []string{"api"}) {
+		t.Errorf("SetLabelFilters(env=prod) = %v, want [api]", list)
+	}
+
+	fs = NewFilterState()
+	fs.SetSearch("status:exited label:env=staging")
+	got = FilterContainers(cnts, fs)
+	if list := serviceNames(got.C); !equalStrings(list, []string{"worker"}) {
+		t.Errorf("inline qualifiers = %v, want [worker]", list)
+	}
+
+	fs = NewFilterState()
+	fs.SetSearch("label:team")
+	got = FilterContainers(cnts, fs)
+	if list := serviceNames(got.C); !equalStrings(list, []string{"api"}) {
+		t.Errorf("label presence qualifier = %v, want [api]", list)
+	}
+}
+
+func TestCycleStatusFilter(t *testing.T) {
+	fs := NewFilterState()
+	want := [][]string{
+		{"running"},
+		{"restarting"},
+		{"exited"},
+		{"paused"},
+		nil,
+	}
+	for i, w := range want {
+		fs.CycleStatusFilter()
+		if !equalStrings(fs.StatusFilter, w) {
+			t.Errorf("step %d: StatusFilter = %v, want %v", i, fs.StatusFilter, w)
+		}
+	}
+}
+
+func TestSaveAndLoadFilterState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "filter_state.json")
+
+	loadedMissing, err := LoadFilterState(path)
+	if err != nil {
+		t.Fatalf("LoadFilterState missing: %v", err)
+	}
+	if loadedMissing.Active {
+		t.Errorf("missing file should return inactive FilterState")
+	}
+
+	want := NewFilterState()
+	want.SetSearch("api")
+	want.SetStatusFilter([]string{"running"})
+	want.SetLabelFilters(map[string]string{"env": "prod"})
+	want.SetMinLogLevel(metrics.LogLevelWarn)
+
+	if err := SaveFilterState(path, want); err != nil {
+		t.Fatalf("SaveFilterState: %v", err)
+	}
+
+	got, err := LoadFilterState(path)
+	if err != nil {
+		t.Fatalf("LoadFilterState: %v", err)
+	}
+	if got.SearchText != want.SearchText || !equalStrings(got.StatusFilter, want.StatusFilter) ||
+		got.LabelFilters["env"] != "prod" || got.MinLogLevel != want.MinLogLevel || !got.Active {
+		t.Errorf("loaded state = %+v, want %+v", got, want)
 	}
 }
