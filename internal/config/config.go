@@ -15,9 +15,11 @@ import (
 // Built-in defaults. They reproduce the values that used to be hard-coded, so
 // running without any config file behaves exactly as before.
 const (
-	defaultRefreshInterval = 2 * time.Second
-	defaultTailLines       = 50
-	defaultOTLPAddress     = "127.0.0.1:4318"
+	defaultRefreshInterval    = 2 * time.Second
+	defaultTailLines          = 50
+	defaultOTLPAddress        = "127.0.0.1:4318"
+	defaultMaxConcurrency     = 16
+	defaultMaxRefreshInterval = 10 * time.Second
 )
 
 // DefaultThemeName is the theme used when theme.name is empty. The UI package
@@ -36,7 +38,15 @@ type Config struct {
 	Alerts          AlertsConfig      `yaml:"alerts"`
 	History         HistoryConfig     `yaml:"history"`
 	Logs            LogsConfig        `yaml:"logs"`
+	Performance     PerformanceConfig `yaml:"performance"`
 	RefreshInterval time.Duration     `yaml:"refresh_interval"`
+}
+
+// PerformanceConfig controls concurrency and adaptive polling behavior.
+type PerformanceConfig struct {
+	MaxRefreshInterval time.Duration `yaml:"max_refresh_interval"`
+	MaxConcurrency     int           `yaml:"max_concurrency"`
+	AdaptivePolling    bool          `yaml:"adaptive_polling"`
 }
 
 // LogsConfig controls log collection.
@@ -140,5 +150,10 @@ func Default() Config {
 		Alerts:          AlertsConfig{Enabled: true},
 		Tracing:         TracingConfig{OTLPReceiver: OTLPReceiverConfig{Address: defaultOTLPAddress}},
 		AWS:             AWSConfig{Enabled: awsEnabledAuto},
+		Performance: PerformanceConfig{
+			MaxConcurrency:     defaultMaxConcurrency,
+			MaxRefreshInterval: defaultMaxRefreshInterval,
+			AdaptivePolling:    false,
+		},
 	}
 }

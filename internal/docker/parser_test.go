@@ -1,7 +1,11 @@
 package docker
 
 import (
+	"bytes"
+	"encoding/binary"
+	"io"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/b92c/gowatch/pkg/metrics"
@@ -146,5 +150,86 @@ func TestParseLogLevel(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("ParseLogLevel(%q) = %v; want %v", tt.line, got, tt.expected)
 		}
+	}
+}
+
+func appendDockerLogFrame(buf *bytes.Buffer, streamType byte, payload []byte) {
+	var header [logFrameHeaderSize]byte
+	header[0] = streamType
+	binary.BigEndian.PutUint32(header[logFramePayloadSizeAt:], uint32(len(payload)))
+	buf.Write(header[:])
+	buf.Write(payload)
+}
+
+func TestParseLogsTruncatesOversizedFrame(t *testing.T) {
+	var buf bytes.Buffer
+	oversized := bytes.Repeat([]byte("a"), maxLogFrameSize+128)
+	appendDockerLogFrame(&buf, 1, oversized)
+	appendDockerLogFrame(&buf, 1, []byte("next aligned frame\n"))
+
+	logs := ParseLogs(io.NopCloser(&buf))
+	if len(logs) != 2 {
+		t.Fatalf("expected 2 log lines, got %d", len(logs))
+	}
+	if len(logs[0]) != maxLogFrameSize || logs[0] != strings.Repeat("a", maxLogFrameSize) {
+		t.Fatalf("expected first frame truncated to %d bytes, got %d bytes", maxLogFrameSize, len(logs[0]))
+	}
+	if logs[1] != "next aligned frame" {
+		t.Fatalf("expected second frame 'next aligned frame', got %q", logs[1])
+	}
+}
+
+func BenchmarkParseStats(b *testing.B) {
+	stats := container.StatsResponse{
+		CPUStats: container.CPUStats{
+			CPUUsage:    container.CPUUsage{TotalUsage: 200},
+			SystemUsage: 300,
+			OnlineCPUs:  2,
+		},
+		PreCPUStats: container.CPUStats{
+			CPUUsage:    container.CPUUsage{TotalUsage: 100},
+			SystemUsage: 200,
+		},
+		MemoryStats: container.MemoryStats{
+			Usage:   1024,
+			Failcnt: 2,
+		},
+		PidsStats: container.PidsStats{
+			Current: 8,
+		},
+		Networks: map[string]container.NetworkStats{
+			"eth0": {RxBytes: 100, TxBytes: 200, RxPackets: 10, TxPackets: 20},
+			"eth1": {RxBytes: 300, TxBytes: 400, RxPackets: 30, TxPackets: 40},
+		},
+		BlkioStats: container.BlkioStats{
+			IoServiceBytesRecursive: []container.BlkioStatEntry{
+				{Op: "READ", Value: 500},
+				{Op: "Write", Value: 700},
+			},
+			IoServicedRecursive: []container.BlkioStatEntry{
+				{Op: "read", Value: 5},
+				{Op: "WRITE", Value: 7},
+			},
+		},
+	}
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = ParseStats(stats)
+	}
+}
+
+func BenchmarkParseLogs(b *testing.B) {
+	var buf bytes.Buffer
+	for i := 0; i < 50; i++ {
+		appendDockerLogFrame(&buf, 1, []byte("2026-04-21 12:00:00 [INFO] GET /api/v1/health status=200\n"))
+	}
+	raw := buf.Bytes()
+	reader := bytes.NewReader(raw)
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		reader.Reset(raw)
+		_ = ParseLogs(io.NopCloser(reader))
 	}
 }

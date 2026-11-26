@@ -10,18 +10,29 @@ import (
 )
 
 func ParseStats(statsJSON container.StatsResponse) metrics.ContainerStats {
+	var netRxBytes, netTxBytes, netRxPackets, netTxPackets uint64
+	for _, stats := range statsJSON.Networks {
+		netRxBytes += stats.RxBytes
+		netTxBytes += stats.TxBytes
+		netRxPackets += stats.RxPackets
+		netTxPackets += stats.TxPackets
+	}
+
+	diskReadBytes, diskWriteBytes := parseBlkioReadWrite(statsJSON.BlkioStats.IoServiceBytesRecursive)
+	diskReadOps, diskWriteOps := parseBlkioReadWrite(statsJSON.BlkioStats.IoServicedRecursive)
+
 	parsed := metrics.ContainerStats{
 		MemUsage:       statsJSON.MemoryStats.Usage,
 		PIDsCurrent:    statsJSON.PidsStats.Current,
 		OOMEvents:      statsJSON.MemoryStats.Failcnt,
-		NetRxBytes:     parseNetworkRxBytes(statsJSON),
-		NetTxBytes:     parseNetworkTxBytes(statsJSON),
-		NetRxPackets:   parseNetworkRxPackets(statsJSON),
-		NetTxPackets:   parseNetworkTxPackets(statsJSON),
-		DiskReadBytes:  parseDiskReadBytes(statsJSON),
-		DiskWriteBytes: parseDiskWriteBytes(statsJSON),
-		DiskReadOps:    parseDiskReadOps(statsJSON),
-		DiskWriteOps:   parseDiskWriteOps(statsJSON),
+		NetRxBytes:     netRxBytes,
+		NetTxBytes:     netTxBytes,
+		NetRxPackets:   netRxPackets,
+		NetTxPackets:   netTxPackets,
+		DiskReadBytes:  diskReadBytes,
+		DiskWriteBytes: diskWriteBytes,
+		DiskReadOps:    diskReadOps,
+		DiskWriteOps:   diskWriteOps,
 	}
 
 	if statsJSON.PreCPUStats.CPUUsage.TotalUsage == 0 || statsJSON.PreCPUStats.SystemUsage == 0 {
@@ -45,86 +56,27 @@ func ParseStats(statsJSON container.StatsResponse) metrics.ContainerStats {
 	return parsed
 }
 
-func parseNetworkRxBytes(statsJSON container.StatsResponse) uint64 {
-	var total uint64
-	for _, stats := range statsJSON.Networks {
-		total += stats.RxBytes
-	}
-	return total
-}
-
-func parseNetworkTxBytes(statsJSON container.StatsResponse) uint64 {
-	var total uint64
-	for _, stats := range statsJSON.Networks {
-		total += stats.TxBytes
-	}
-	return total
-}
-
-func parseNetworkRxPackets(statsJSON container.StatsResponse) uint64 {
-	var total uint64
-	for _, stats := range statsJSON.Networks {
-		total += stats.RxPackets
-	}
-	return total
-}
-
-func parseNetworkTxPackets(statsJSON container.StatsResponse) uint64 {
-	var total uint64
-	for _, stats := range statsJSON.Networks {
-		total += stats.TxPackets
-	}
-	return total
-}
-
-func parseDiskReadBytes(statsJSON container.StatsResponse) uint64 {
-	var total uint64
-	for _, entry := range statsJSON.BlkioStats.IoServiceBytesRecursive {
+func parseBlkioReadWrite(entries []container.BlkioStatEntry) (readVal, writeVal uint64) {
+	for _, entry := range entries {
 		if strings.EqualFold(entry.Op, "read") {
-			total += entry.Value
+			readVal += entry.Value
+		} else if strings.EqualFold(entry.Op, "write") {
+			writeVal += entry.Value
 		}
 	}
-	return total
-}
-
-func parseDiskWriteBytes(statsJSON container.StatsResponse) uint64 {
-	var total uint64
-	for _, entry := range statsJSON.BlkioStats.IoServiceBytesRecursive {
-		if strings.EqualFold(entry.Op, "write") {
-			total += entry.Value
-		}
-	}
-	return total
-}
-
-func parseDiskReadOps(statsJSON container.StatsResponse) uint64 {
-	var total uint64
-	for _, entry := range statsJSON.BlkioStats.IoServicedRecursive {
-		if strings.EqualFold(entry.Op, "read") {
-			total += entry.Value
-		}
-	}
-	return total
-}
-
-func parseDiskWriteOps(statsJSON container.StatsResponse) uint64 {
-	var total uint64
-	for _, entry := range statsJSON.BlkioStats.IoServicedRecursive {
-		if strings.EqualFold(entry.Op, "write") {
-			total += entry.Value
-		}
-	}
-	return total
+	return readVal, writeVal
 }
 
 const (
 	logFrameHeaderSize    = 8
 	logFramePayloadSizeAt = 4
+	maxLogFrameSize       = 1 << 20
 )
 
 func ParseLogs(rawLogs io.ReadCloser) []string {
 	var logs []string
 	frameHeader := make([]byte, logFrameHeaderSize)
+	scratch := make([]byte, 0, 4096)
 
 	for {
 		_, err := io.ReadFull(rawLogs, frameHeader)
@@ -137,13 +89,27 @@ func ParseLogs(rawLogs io.ReadCloser) []string {
 			continue
 		}
 
-		payload := make([]byte, payloadSize)
-		_, err = io.ReadFull(rawLogs, payload)
+		readSize := min(payloadSize, maxLogFrameSize)
+		remaining := payloadSize - readSize
+
+		if readSize > cap(scratch) {
+			scratch = make([]byte, readSize)
+		} else {
+			scratch = scratch[:readSize]
+		}
+
+		_, err = io.ReadFull(rawLogs, scratch)
 		if err != nil {
 			break
 		}
 
-		logLine := strings.TrimSpace(string(payload))
+		if remaining > 0 {
+			if _, err := io.CopyN(io.Discard, rawLogs, int64(remaining)); err != nil {
+				break
+			}
+		}
+
+		logLine := strings.TrimSpace(string(scratch))
 		if logLine != "" {
 			logs = append(logs, logLine)
 		}

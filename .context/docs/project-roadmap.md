@@ -36,12 +36,9 @@ Status checked against the code in October 2026. Legend:
 
 **By phase** (the gaps are listed under each phase and item below)
 
-- Phase 1 ✅: done (P1.1 status/label filtering + persistence, P1.2 extended metrics, P1.3 `min/max/avg` summary toggle, P1.4 log search & JSON export).
-- Phase 2 ✅: done, except the Emacs keybinding mode.
-- Phase 3 ✅: done (P3.1 OTLP receiver & log correlator, P3.2 dedicated traces flamegraph modal & log-to-span linking, P3.3 OTLP/Jaeger/GoWatch exporters & deterministic sampling).
-- Phase 4 ✅: done (P4.1–P4.4 AWS SigV4 HTTP client, live CloudWatch/Lambda/X-Ray/CloudFormation collectors, `CollectAll` integration, and connection/error status in AWS view).
-- Phase 5 ✅: done (P5.1 CPU, memory, OOM, container state, disk I/O & log pattern rules; P5.2 async notification dispatcher for webhooks/Slack/Discord/Teams/PagerDuty/SNS/SMTP/desktop; P5.3 UI alert acknowledgement & session stats).
-- Phases 6 and 7 ⚪: not started.
+- Phases 1–5 ✅: done.
+- Phase 6 🟡: P6.1 ✅ done (bounded parallel collection, HTTP connection pooling, adaptive polling, in-place history compaction with isolated clones, stale container pruning, 30s host info TTL cache, single-pass `ParseStats`, reusable frame-safe `ParseLogs` buffer, fast-path & span dedup in `internal/trace`); P6.2–P6.4 ⚪ not started.
+- Phase 7 ⚪: not started.
 
 ---
 
@@ -195,14 +192,14 @@ Status: the alerts list (`w`) shows the active alerts and the resolved ones unti
 
 ---
 
-## Phase 6: Performance & Advanced Features (Q3-Q4 2027) ⚪
+## Phase 6: Performance & Advanced Features (Q3-Q4 2027) 🟡
 
-Not started: nothing in the code implements these items.
+P6.1 is complete; P6.2–P6.4 have not started.
 
-**P6.1 - Performance Optimization**
-- Adaptive Docker polling
-- Connection pooling
-- Memory management for 100+ containers
+**P6.1 - Performance Optimization** ✅
+- Adaptive Docker polling (`AdaptivePoller` in `internal/docker/adaptive.go`, `performance.*` config)
+- Connection pooling (`NewPooledHTTPClient`) and bounded parallel container collection (`max_concurrency`)
+- Memory management for 100+ containers (in-place `trimHistory` with isolated `slices.Clone` return, stale container pruning, 30s TTL cache for static host `NCPU`/`MemTotal`, single-pass `ParseStats`, reusable frame-safe buffer in `ParseLogs`, fast-path + span deduplication in `internal/trace`)
 
 **P6.2 - Multi-host Monitoring**
 - Multiple Docker daemons

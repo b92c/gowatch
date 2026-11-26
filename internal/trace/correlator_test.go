@@ -64,3 +64,44 @@ func TestCorrelatorProcessLogLine(t *testing.T) {
 		t.Fatalf("expected 2 active traces, got %d", ts.GetTraceCount())
 	}
 }
+
+func TestCorrelatorDeduplicatesRepeatedLogLine(t *testing.T) {
+	ts := NewTraceStore()
+	c := NewCorrelator(ts)
+
+	line := "2026-04-21 12:00:00 [INFO] 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01 GET /api/v1/orders"
+	if span := c.ProcessLogLine("orders-service", line); span == nil {
+		t.Fatalf("expected initial span to be extracted")
+	}
+	if span := c.ProcessLogLine("orders-service", line); span == nil {
+		t.Fatalf("expected repeated call to still return parsed span")
+	}
+
+	traces := ts.GetTraces()
+	if len(traces) != 1 {
+		t.Fatalf("expected 1 trace, got %d", len(traces))
+	}
+	if len(traces[0].Spans) != 1 {
+		t.Fatalf("expected 1 span after deduplication, got %d", len(traces[0].Spans))
+	}
+}
+
+func BenchmarkProcessLogLine(b *testing.B) {
+	b.Run("Miss", func(b *testing.B) {
+		c := NewCorrelator(NewTraceStore())
+		line := "2026-04-21 12:00:00 [INFO] health check ok status=200 latency=2ms"
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = c.ProcessLogLine("api", line)
+		}
+	})
+
+	b.Run("Hit", func(b *testing.B) {
+		c := NewCorrelator(NewTraceStore())
+		line := "2026-04-21 12:00:00 [INFO] 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01 GET /api/v1/orders"
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = c.ProcessLogLine("api", line)
+		}
+	})
+}

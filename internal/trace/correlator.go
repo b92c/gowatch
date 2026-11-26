@@ -31,7 +31,7 @@ func (c *Correlator) Store() *TraceStore {
 }
 
 func (c *Correlator) ProcessLogLine(service string, line string) *Span {
-	if line == "" {
+	if line == "" || !hasTraceHint(line) {
 		return nil
 	}
 
@@ -90,4 +90,35 @@ func extractOperationName(line string) string {
 		}
 	}
 	return "log_event"
+}
+
+func hasTraceHint(line string) bool {
+	return strings.Contains(line, "00-") ||
+		containsASCIIFold(line, "trace") ||
+		containsASCIIFold(line, "span") ||
+		containsASCIIFold(line, "request")
+}
+
+func containsASCIIFold(s, lowerSubstr string) bool {
+	n := len(lowerSubstr)
+	if len(s) < n {
+		return false
+	}
+	for i := 0; i <= len(s)-n; i++ {
+		match := true
+		for j := 0; j < n; j++ {
+			c := s[i+j]
+			if c >= 'A' && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			if c != lowerSubstr[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }

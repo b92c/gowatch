@@ -1,7 +1,7 @@
 # Active Memory - GoWatch Session
 
-**Data**: 2026-11-20  
-**Status**: Fases 1 a 5 concluídas (Etapas 1 a 4 do plano de fechamento de lacunas implementadas e verificadas). Fases 6 e 7 permanecem não iniciadas.
+**Data**: 2026-11-21  
+**Status**: Fases 1 a 5 e P6.1 (Otimização de Performance) concluídas e verificadas; P6.2–P6.4 e Fase 7 permanecem não iniciadas.
 
 ---
 
@@ -144,5 +144,5 @@ Plano estruturado em 4 etapas incrementais (registrado também em `.context/docs
 
 ---
 
-**Encerrado em**: 2026-11-20  
-**Retomar por**: Fases 6 ou 7 (conforme priorização do usuário), com Fases 1 a 5 concluídas e verificadas.
+**Encerrado em**: 2026-11-21  
+**Retomar por**: P6.2–P6.4 ou Fase 7 (conforme priorização do usuário), com Fases 1 a 5 e P6.1 concluídas e verificadas.

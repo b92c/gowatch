@@ -20,6 +20,8 @@ const (
 	minHistoryPoints   = 10
 	maxHistoryPoints   = 3600
 	maxLayoutHeight    = 100
+	minMaxConcurrency  = 1
+	maxMaxConcurrency  = 128
 )
 
 // Accepted spellings of aws.enabled.
@@ -51,8 +53,20 @@ func (c *Config) Validate() error {
 	errs = append(errs, c.Alerts.validate()...)
 	errs = append(errs, c.Tracing.validate()...)
 	errs = append(errs, c.Layout.validate()...)
+	errs = append(errs, c.Performance.validate(c.RefreshInterval)...)
 
 	return errors.Join(errs...)
+}
+
+func (p PerformanceConfig) validate(refreshInterval time.Duration) []error {
+	var errs []error
+	if p.MaxConcurrency < minMaxConcurrency || p.MaxConcurrency > maxMaxConcurrency {
+		errs = append(errs, fmt.Errorf("performance.max_concurrency must be between %d and %d, got %d", minMaxConcurrency, maxMaxConcurrency, p.MaxConcurrency))
+	}
+	if p.MaxRefreshInterval < refreshInterval {
+		errs = append(errs, fmt.Errorf("performance.max_refresh_interval (%s) must be at least refresh_interval (%s)", p.MaxRefreshInterval, refreshInterval))
+	}
+	return errs
 }
 
 func (t TracingConfig) validate() []error {

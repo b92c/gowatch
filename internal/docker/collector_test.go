@@ -2,6 +2,8 @@ package docker
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +17,7 @@ import (
 	"github.com/b92c/gowatch/internal/aws"
 	"github.com/b92c/gowatch/internal/trace"
 	"github.com/b92c/gowatch/pkg/metrics"
+	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 )
 
@@ -31,13 +34,15 @@ func uniqueID(prefix string) string {
 func saveSettings(t *testing.T) {
 	t.Helper()
 	settingsMutex.RLock()
-	tail, history, manager := logTailLines, historyMaxPoints, globalAWSManager
+	tail, history, conc, incAll, manager := logTailLines, historyMaxPoints, maxConcurrency, includeAllContainers, globalAWSManager
 	settingsMutex.RUnlock()
+	resetHostInfoCache()
 
 	t.Cleanup(func() {
 		settingsMutex.Lock()
-		logTailLines, historyMaxPoints, globalAWSManager = tail, history, manager
+		logTailLines, historyMaxPoints, maxConcurrency, includeAllContainers, globalAWSManager = tail, history, conc, incAll, manager
 		settingsMutex.Unlock()
+		resetHostInfoCache()
 		globalAlertEngine.SetRules(alert.DefaultRules())
 		// Alerts raised through the global engine would otherwise outlive the
 		// test: with no containers left, Evaluate resolves them all.
@@ -382,4 +387,110 @@ func TestOTLPReceiverFeedsTheGlobalTraceStore(t *testing.T) {
 		}
 	}
 	t.Error("the posted trace never reached the global trace store")
+}
+
+func TestPruneStaleContainersRemovesStoppedIDs(t *testing.T) {
+	saveSettings(t)
+	idActive := uniqueID("prune-active")
+	idStale := uniqueID("prune-stale")
+	forgetContainer(t, idActive)
+	forgetContainer(t, idStale)
+
+	statsMutex.Lock()
+	previousStats[idActive] = container.StatsResponse{}
+	previousStats[idStale] = container.StatsResponse{}
+	historyStore[idActive] = metrics.ContainerStats{CPUPercent: 10}
+	historyStore[idStale] = metrics.ContainerStats{CPUPercent: 20}
+	statsMutex.Unlock()
+
+	pruneStaleContainers([]container.Summary{{ID: idActive}})
+
+	statsMutex.RLock()
+	_, activePrev := previousStats[idActive]
+	_, stalePrev := previousStats[idStale]
+	_, activeHist := historyStore[idActive]
+	_, staleHist := historyStore[idStale]
+	statsMutex.RUnlock()
+
+	if !activePrev || !activeHist {
+		t.Error("active container was unexpectedly pruned")
+	}
+	if stalePrev || staleHist {
+		t.Error("stale container was not pruned from previousStats/historyStore")
+	}
+}
+
+func TestWatchContainersParallel100Containers(t *testing.T) {
+	saveSettings(t)
+	Configure(Options{MaxConcurrency: 16})
+
+	const count = 100
+	summaries := make([]container.Summary, count)
+	for i := range count {
+		id := fmt.Sprintf("parallel-cnt-%03d", i)
+		forgetContainer(t, id)
+		summaries[i] = container.Summary{
+			ID:     id,
+			Image:  "alpine:latest",
+			State:  "running",
+			Status: "Up",
+			Labels: map[string]string{
+				"com.docker.compose.service": fmt.Sprintf("svc-%03d", i),
+			},
+		}
+	}
+
+	var infoCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(summaries)
+		case strings.HasSuffix(r.URL.Path, "/info"):
+			infoCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"NCPU": 8, "MemTotal": 16 << 30})
+		case strings.HasSuffix(r.URL.Path, "/stats"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"memory_stats":{"usage":1048576}}`))
+		case strings.HasSuffix(r.URL.Path, "/logs"):
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	apiClient, err := client.New(
+		client.WithHost("tcp://"+strings.TrimPrefix(srv.URL, "http://")),
+		client.WithScheme("http"),
+		client.WithAPIVersion("1.52"),
+		client.WithHTTPClient(NewPooledHTTPClient(16)),
+	)
+	if err != nil {
+		t.Fatalf("client.New() error = %v", err)
+	}
+	defer func() { _ = apiClient.Close() }()
+
+	got, err := WatchContainers(context.Background(), apiClient)
+	if err != nil {
+		t.Fatalf("WatchContainers() error = %v", err)
+	}
+	if len(got.C) != count {
+		t.Fatalf("len(got.C) = %d, want %d", len(got.C), count)
+	}
+	for i := range count {
+		wantSvc := fmt.Sprintf("svc-%03d", i)
+		if got.C[i].Service != wantSvc {
+			t.Fatalf("container[%d].Service = %q, want %q (order not preserved)", i, got.C[i].Service, wantSvc)
+		}
+	}
+
+	// Second call within 30s must hit the host info cache (infoCalls stays 1).
+	if _, err := WatchContainers(context.Background(), apiClient); err != nil {
+		t.Fatalf("second WatchContainers() error = %v", err)
+	}
+	if calls := infoCalls.Load(); calls != 1 {
+		t.Errorf("apiClient.Info called %d times within cache TTL, want 1", calls)
+	}
 }
