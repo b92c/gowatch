@@ -119,6 +119,15 @@ func (ts *TraceStore) AddSpan(span *Span) {
 		}
 		ts.traces[span.TraceID] = tr
 		ts.order = append(ts.order, span.TraceID)
+	} else if rawLine := span.Attributes["raw_line"]; rawLine != "" {
+		for _, existing := range tr.Spans {
+			if existing.ServiceName == span.ServiceName &&
+				existing.SpanID == span.SpanID &&
+				existing.Attributes["raw_line"] == rawLine {
+				ts.mu.Unlock()
+				return
+			}
+		}
 	}
 
 	tr.Spans = append(tr.Spans, span)

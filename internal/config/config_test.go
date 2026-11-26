@@ -42,8 +42,31 @@ func TestDefaultMatchesLegacyValues(t *testing.T) {
 	if cfg.Filters.Search != "" || len(cfg.Filters.Status) != 0 || cfg.Filters.MinLogLevel() != metrics.LogLevelUnknown {
 		t.Errorf("filters must default to none, got %+v", cfg.Filters)
 	}
+	if cfg.Performance.MaxConcurrency != 16 || cfg.Performance.MaxRefreshInterval != 10*time.Second || cfg.Performance.AdaptivePolling {
+		t.Errorf("Performance = %+v, want MaxConcurrency=16, MaxRefreshInterval=10s, AdaptivePolling=false", cfg.Performance)
+	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("Default() must be valid: %v", err)
+	}
+}
+
+func TestPerformanceIsLoaded(t *testing.T) {
+	cfg, err := loadYAML(t, `
+performance:
+  max_concurrency: 32
+  adaptive_polling: true
+  max_refresh_interval: 15s
+`)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	want := PerformanceConfig{
+		MaxConcurrency:     32,
+		AdaptivePolling:    true,
+		MaxRefreshInterval: 15 * time.Second,
+	}
+	if !reflect.DeepEqual(cfg.Performance, want) {
+		t.Errorf("Performance = %+v, want %+v", cfg.Performance, want)
 	}
 }
 

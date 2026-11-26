@@ -123,6 +123,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	docker.Configure(docker.Options{
 		LogTailLines:         cfg.Logs.TailLines,
 		HistoryMaxPoints:     cfg.History.MaxPoints,
+		MaxConcurrency:       cfg.Performance.MaxConcurrency,
 		IncludeAllContainers: len(cfg.Filters.Status) > 0,
 		AlertRules:           cfg.Alerts.Rules(),
 		AWS: aws.Options{
@@ -195,9 +196,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	dashboard.RestorePersistedFilters()
 
 	go func() {
-		ticker := time.NewTicker(cfg.RefreshInterval)
-		defer ticker.Stop()
+		poller := docker.NewAdaptivePoller(cfg.RefreshInterval, cfg.Performance.MaxRefreshInterval, cfg.Performance.AdaptivePolling)
 
+		start := time.Now()
 		containers, err := docker.WatchContainers(ctx, apiClient)
 		if err != nil {
 			dashboard.ShowDaemonError(err)
@@ -205,16 +206,22 @@ func run(args []string, stdout, stderr io.Writer) int {
 			dashboard.Update(containers)
 		}
 
+		timer := time.NewTimer(poller.NextInterval(time.Since(start), containers))
+		defer timer.Stop()
+
 		for {
 			select {
-			case <-ticker.C:
+			case <-timer.C:
+				start = time.Now()
 				containers, err := docker.WatchContainers(ctx, apiClient)
 				if err != nil {
 					dashboard.ShowDaemonError(err)
+					timer.Reset(poller.NextInterval(time.Since(start), docker.Containers{}))
 					continue
 				}
 				dashboard.ClearDaemonError()
 				dashboard.Update(containers)
+				timer.Reset(poller.NextInterval(time.Since(start), containers))
 			case <-ctx.Done():
 				return
 			}

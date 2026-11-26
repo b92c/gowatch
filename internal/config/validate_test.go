@@ -121,6 +121,19 @@ func TestValidate(t *testing.T) {
 			c.Logs.TailLines = 0
 			c.History.MaxPoints = 1
 		}, []string{"refresh_interval", "logs.tail_lines", "history.max_points"}},
+
+		{"performance max_concurrency at minimum", func(c *Config) { c.Performance.MaxConcurrency = 1 }, nil},
+		{"performance max_concurrency at maximum", func(c *Config) { c.Performance.MaxConcurrency = 128 }, nil},
+		{"performance max_concurrency below minimum", func(c *Config) { c.Performance.MaxConcurrency = 0 }, []string{"performance.max_concurrency"}},
+		{"performance max_concurrency above maximum", func(c *Config) { c.Performance.MaxConcurrency = 129 }, []string{"performance.max_concurrency"}},
+		{"performance max_refresh_interval equal to refresh_interval", func(c *Config) {
+			c.RefreshInterval = 2 * time.Second
+			c.Performance.MaxRefreshInterval = 2 * time.Second
+		}, nil},
+		{"performance max_refresh_interval below refresh_interval", func(c *Config) {
+			c.RefreshInterval = 2 * time.Second
+			c.Performance.MaxRefreshInterval = time.Second
+		}, []string{"performance.max_refresh_interval"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

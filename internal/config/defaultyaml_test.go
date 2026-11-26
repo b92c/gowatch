@@ -22,7 +22,7 @@ func TestDefaultYAML(t *testing.T) {
 		for k := range doc {
 			got = append(got, k)
 		}
-		want := []string{"refresh_interval", "logs", "history", "filters", "alerts", "tracing", "aws", "theme", "layout", "keybindings"}
+		want := []string{"refresh_interval", "logs", "history", "filters", "alerts", "tracing", "aws", "theme", "layout", "keybindings", "performance"}
 		if len(got) != len(want) {
 			t.Fatalf("sections = %v, want %v", got, want)
 		}

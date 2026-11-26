@@ -41,6 +41,11 @@ func DefaultYAML() []byte {
 	b.WriteString("\nlogs:\n  # Log lines fetched per container on every refresh (1-5000).\n")
 	fmt.Fprintf(&b, "  tail_lines: %d\n", def.Logs.TailLines)
 
+	b.WriteString("\nperformance:\n  # Maximum concurrent Docker API requests (1-128).\n")
+	fmt.Fprintf(&b, "  max_concurrency: %d\n", def.Performance.MaxConcurrency)
+	fmt.Fprintf(&b, "  adaptive_polling: %t     # true scales polling interval up when containers are idle\n", def.Performance.AdaptivePolling)
+	fmt.Fprintf(&b, "  max_refresh_interval: %s  # upper bound for adaptive polling (>= refresh_interval)\n", def.Performance.MaxRefreshInterval)
+
 	b.WriteString("\nhistory:\n  # Samples kept per container for the CPU and memory sparklines (10-3600).\n")
 	fmt.Fprintf(&b, "  max_points: %d\n", def.History.MaxPoints)
 	fmt.Fprintf(&b, "  show_summary: %t   # true appends min/max/avg to the CPU and Memory columns\n", def.History.ShowSummary)

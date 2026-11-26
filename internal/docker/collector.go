@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"maps"
 	"runtime"
+	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/b92c/gowatch/internal/alert"
@@ -32,7 +34,11 @@ type FormattedLog struct {
 
 // defaultLogTailLines is the number of log lines fetched per container when
 // Configure does not override it.
-const defaultLogTailLines = 50
+const (
+	defaultLogTailLines   = 50
+	defaultMaxConcurrency = 16
+	hostInfoCacheTTL      = 30 * time.Second
+)
 
 var (
 	previousStats     = make(map[string]container.StatsResponse)
@@ -43,11 +49,17 @@ var (
 	globalAlertEngine = alert.NewAlertEngine(nil)
 	statsMutex        sync.RWMutex
 
+	hostCacheMutex sync.Mutex
+	cachedCPUCount int
+	cachedMemTotal uint64
+	cachedHostAt   time.Time
+
 	// settingsMutex guards globalAWSManager and the values below, which
 	// Configure may replace.
 	settingsMutex        sync.RWMutex
 	logTailLines         = defaultLogTailLines
 	historyMaxPoints     = metrics.MaxHistoryPoints
+	maxConcurrency       = defaultMaxConcurrency
 	includeAllContainers bool
 )
 
@@ -59,6 +71,7 @@ type Options struct {
 	AlertRules           []alert.AlertRule
 	LogTailLines         int
 	HistoryMaxPoints     int
+	MaxConcurrency       int
 	IncludeAllContainers bool
 }
 
@@ -72,6 +85,9 @@ func Configure(o Options) {
 	if o.HistoryMaxPoints > 0 {
 		historyMaxPoints = o.HistoryMaxPoints
 	}
+	if o.MaxConcurrency > 0 {
+		maxConcurrency = o.MaxConcurrency
+	}
 	if o.IncludeAllContainers {
 		includeAllContainers = true
 	}
@@ -83,6 +99,15 @@ func Configure(o Options) {
 	if o.AlertRules != nil {
 		globalAlertEngine.SetRules(o.AlertRules)
 	}
+}
+
+func currentMaxConcurrency() int {
+	settingsMutex.RLock()
+	defer settingsMutex.RUnlock()
+	if maxConcurrency <= 0 {
+		return defaultMaxConcurrency
+	}
+	return maxConcurrency
 }
 
 func currentIncludeAllContainers() bool {
@@ -103,10 +128,11 @@ func currentHistoryMaxPoints() int {
 	return historyMaxPoints
 }
 
-// trimHistory keeps only the newest limit points.
+// trimHistory keeps only the newest limit points by compacting in place.
 func trimHistory(points []metrics.MetricPoint, limit int) []metrics.MetricPoint {
 	if len(points) > limit {
-		return points[len(points)-limit:]
+		copy(points, points[len(points)-limit:])
+		return points[:limit]
 	}
 	return points
 }
@@ -137,17 +163,19 @@ func getContainerStats(ctx context.Context, apiClient *client.Client, containerI
 		return metrics.ContainerStats{}
 	}
 
-	statsMutex.Lock()
-	defer statsMutex.Unlock()
+	maxPoints := currentHistoryMaxPoints()
 
+	statsMutex.Lock()
 	prevStats, exists := previousStats[containerID]
 	if exists {
 		statsJSON.PreCPUStats = prevStats.CPUStats
 	}
 	previousStats[containerID] = statsJSON
+	statsMutex.Unlock()
 
 	stat := ParseStats(statsJSON)
 
+	statsMutex.Lock()
 	h, exists := historyStore[containerID]
 	if !exists {
 		h = metrics.ContainerStats{}
@@ -170,19 +198,54 @@ func getContainerStats(ctx context.Context, apiClient *client.Client, containerI
 	h.CPUHistory = append(h.CPUHistory, metrics.MetricPoint{Timestamp: now, Value: stat.CPUPercent})
 	h.MemHistory = append(h.MemHistory, metrics.MetricPoint{Timestamp: now, Value: float64(stat.MemUsage)})
 
-	maxPoints := currentHistoryMaxPoints()
 	h.CPUHistory = trimHistory(h.CPUHistory, maxPoints)
 	h.MemHistory = trimHistory(h.MemHistory, maxPoints)
 
 	historyStore[containerID] = h
-	return h
+
+	out := h
+	out.CPUHistory = slices.Clone(h.CPUHistory)
+	out.MemHistory = slices.Clone(h.MemHistory)
+	statsMutex.Unlock()
+	return out
+}
+
+func pruneStaleContainers(active []container.Summary) {
+	activeIDs := make(map[string]struct{}, len(active))
+	for _, c := range active {
+		activeIDs[c.ID] = struct{}{}
+	}
+	statsMutex.Lock()
+	for id := range previousStats {
+		if _, ok := activeIDs[id]; !ok {
+			delete(previousStats, id)
+		}
+	}
+	for id := range historyStore {
+		if _, ok := activeIDs[id]; !ok {
+			delete(historyStore, id)
+		}
+	}
+	statsMutex.Unlock()
+}
+
+func resetHostInfoCache() {
+	hostCacheMutex.Lock()
+	cachedCPUCount = 0
+	cachedMemTotal = 0
+	cachedHostAt = time.Time{}
+	hostCacheMutex.Unlock()
 }
 
 func getContainerLogs(ctx context.Context, apiClient *client.Client, containerID string) []string {
+	return getContainerLogsWithTail(ctx, apiClient, containerID, currentLogTailLines())
+}
+
+func getContainerLogsWithTail(ctx context.Context, apiClient *client.Client, containerID string, tailLines int) []string {
 	logs, err := apiClient.ContainerLogs(ctx, containerID, client.ContainerLogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
-		Tail:       strconv.Itoa(currentLogTailLines()),
+		Tail:       strconv.Itoa(tailLines),
 	})
 	if err != nil {
 		return []string{"Error fetching logs"}
@@ -201,18 +264,32 @@ func getHostInfo(ctx context.Context, apiClient *client.Client, totalMemUsed uin
 	memFree := memStats.Sys - memStats.Alloc
 
 	if apiClient != nil {
-		if info, err := apiClient.Info(ctx, client.InfoOptions{}); err == nil {
+		hostCacheMutex.Lock()
+		fresh := cachedCPUCount > 0 && time.Since(cachedHostAt) < hostInfoCacheTTL
+		cCPU, cMem := cachedCPUCount, cachedMemTotal
+		hostCacheMutex.Unlock()
+
+		if fresh {
+			cpuCount = cCPU
+			memTotal = cMem
+		} else if info, err := apiClient.Info(ctx, client.InfoOptions{}); err == nil {
 			cpuCount = info.Info.NCPU
 			if info.Info.MemTotal >= 0 {
 				memTotal = uint64(info.Info.MemTotal) // #nosec G115 -- MemTotal is checked to be non-negative above
 			} else {
 				memTotal = 0
 			}
-			if memTotal > totalMemUsed {
-				memFree = memTotal - totalMemUsed
-			} else {
-				memFree = 0
-			}
+			hostCacheMutex.Lock()
+			cachedCPUCount = cpuCount
+			cachedMemTotal = memTotal
+			cachedHostAt = time.Now()
+			hostCacheMutex.Unlock()
+		}
+
+		if memTotal > totalMemUsed {
+			memFree = memTotal - totalMemUsed
+		} else {
+			memFree = 0
 		}
 	}
 
@@ -269,56 +346,84 @@ func WatchContainers(ctx context.Context, apiClient *client.Client) (Containers,
 		return Containers{}, err
 	}
 
-	var containers Containers
-	var totalMemUsed uint64
-	var evalData []alert.ContainerEvaluatorData
+	tailLines := currentLogTailLines()
+	maxConc := currentMaxConcurrency()
 
-	for _, c := range cntList.Items {
-		stat := getContainerStats(ctx, apiClient, c.ID)
-		totalMemUsed += stat.MemUsage
-		logs := getContainerLogs(ctx, apiClient, c.ID)
-		var labels map[string]string
-		if len(c.Labels) > 0 {
-			labels = maps.Clone(c.Labels)
-		}
-		containers.C = append(containers.C, Container{
-			Labels: labels,
-			ID:     c.ID, Image: c.Image, Status: c.Status, State: string(c.State),
-			Command: c.Command, DependsOn: c.Labels["com.docker.compose.depends_on"],
-			Service:    c.Labels["com.docker.compose.service"],
-			SOVersion:  c.Labels["org.opencontainers.image.ref.name"] + " " + c.Labels["org.opencontainers.image.version"],
-			WorkingDir: c.Labels["com.docker.compose.project.working_dir"], ConfigFile: c.Labels["com.docker.compose.project.config_files"],
-			CreatedAt:      c.Created,
-			CPUPercent:     stat.CPUPercent,
-			MemUsage:       stat.MemUsage,
-			NetRxBytes:     stat.NetRxBytes,
-			NetTxBytes:     stat.NetTxBytes,
-			NetRxPackets:   stat.NetRxPackets,
-			NetTxPackets:   stat.NetTxPackets,
-			DiskReadBytes:  stat.DiskReadBytes,
-			DiskWriteBytes: stat.DiskWriteBytes,
-			DiskReadOps:    stat.DiskReadOps,
-			DiskWriteOps:   stat.DiskWriteOps,
-			PIDsCurrent:    stat.PIDsCurrent,
-			OOMEvents:      stat.OOMEvents,
-			CPUHistory:     stat.CPUHistory,
-			MemHistory:     stat.MemHistory,
-			Log:            logs,
-		})
-
-		evalData = append(evalData, alert.ContainerEvaluatorData{
-			ID:             c.ID,
-			Service:        c.Labels["com.docker.compose.service"],
-			State:          string(c.State),
-			Logs:           logs,
-			CPUPercent:     stat.CPUPercent,
-			MemUsage:       stat.MemUsage,
-			OOMEvents:      stat.OOMEvents,
-			DiskReadBytes:  stat.DiskReadBytes,
-			DiskWriteBytes: stat.DiskWriteBytes,
-		})
+	containers := Containers{
+		C:        make([]Container, len(cntList.Items)),
+		FlatLogs: make([]FormattedLog, 0, len(cntList.Items)*tailLines),
 	}
-	containers.Host = getHostInfo(ctx, apiClient, totalMemUsed)
+	evalData := make([]alert.ContainerEvaluatorData, len(cntList.Items))
+
+	var (
+		totalMemAtomic atomic.Uint64
+		wg             sync.WaitGroup
+	)
+	sem := make(chan struct{}, maxConc)
+
+	for i, c := range cntList.Items {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int, cnt container.Summary) {
+			defer func() {
+				<-sem
+				wg.Done()
+			}()
+
+			var stat metrics.ContainerStats
+			if cnt.State != "exited" && cnt.State != "dead" {
+				stat = getContainerStats(ctx, apiClient, cnt.ID)
+				totalMemAtomic.Add(stat.MemUsage)
+			}
+			logs := getContainerLogsWithTail(ctx, apiClient, cnt.ID, tailLines)
+
+			var labels map[string]string
+			if len(cnt.Labels) > 0 {
+				labels = maps.Clone(cnt.Labels)
+			}
+
+			containers.C[idx] = Container{
+				Labels: labels,
+				ID:     cnt.ID, Image: cnt.Image, Status: cnt.Status, State: string(cnt.State),
+				Command: cnt.Command, DependsOn: cnt.Labels["com.docker.compose.depends_on"],
+				Service:    cnt.Labels["com.docker.compose.service"],
+				SOVersion:  cnt.Labels["org.opencontainers.image.ref.name"] + " " + cnt.Labels["org.opencontainers.image.version"],
+				WorkingDir: cnt.Labels["com.docker.compose.project.working_dir"], ConfigFile: cnt.Labels["com.docker.compose.project.config_files"],
+				CreatedAt:      cnt.Created,
+				CPUPercent:     stat.CPUPercent,
+				MemUsage:       stat.MemUsage,
+				NetRxBytes:     stat.NetRxBytes,
+				NetTxBytes:     stat.NetTxBytes,
+				NetRxPackets:   stat.NetRxPackets,
+				NetTxPackets:   stat.NetTxPackets,
+				DiskReadBytes:  stat.DiskReadBytes,
+				DiskWriteBytes: stat.DiskWriteBytes,
+				DiskReadOps:    stat.DiskReadOps,
+				DiskWriteOps:   stat.DiskWriteOps,
+				PIDsCurrent:    stat.PIDsCurrent,
+				OOMEvents:      stat.OOMEvents,
+				CPUHistory:     stat.CPUHistory,
+				MemHistory:     stat.MemHistory,
+				Log:            logs,
+			}
+
+			evalData[idx] = alert.ContainerEvaluatorData{
+				ID:             cnt.ID,
+				Service:        cnt.Labels["com.docker.compose.service"],
+				State:          string(cnt.State),
+				Logs:           logs,
+				CPUPercent:     stat.CPUPercent,
+				MemUsage:       stat.MemUsage,
+				OOMEvents:      stat.OOMEvents,
+				DiskReadBytes:  stat.DiskReadBytes,
+				DiskWriteBytes: stat.DiskWriteBytes,
+			}
+		}(i, c)
+	}
+	wg.Wait()
+
+	pruneStaleContainers(cntList.Items)
+	containers.Host = getHostInfo(ctx, apiClient, totalMemAtomic.Load())
 
 	for _, c := range containers.C {
 		serviceName := c.Service
